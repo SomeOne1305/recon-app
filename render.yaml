@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: recon-app
+    runtime: node
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: NODE_VERSION
+        value: 22.0.0

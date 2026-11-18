@@ -1,0 +1,2394 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fleet Reconciliation</title>
+<style>
+:root {
+  --bg: #090d12;
+  --s1: #10161f;
+  --s2: #161f2c;
+  --s3: #1d2838;
+  --line: #233042;
+  --line-soft: #1b2534;
+  --ink: #eef2f7;
+  --mut: #8b9bb0;
+  --acc: #5b9cf5;
+  --acc-hover: #76aef8;
+  --accbg: rgba(91, 156, 245, 0.14);
+  --ok: #38c182;
+  --okbg: rgba(56, 193, 130, 0.14);
+  --warn: #e5a93b;
+  --warnbg: rgba(229, 169, 59, 0.14);
+  --bad: #f06a62;
+  --badbg: rgba(240, 106, 98, 0.14);
+  --pur: #b69af7;
+  --purbg: rgba(182, 154, 247, 0.14);
+  --radius: 12px;
+  --shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 14px/1.55 Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1 { font-size: 24px; line-height: 1.25; font-weight: 600; margin: 0; letter-spacing: -0.02em; }
+h2 { font-size: 20px; line-height: 1.3; font-weight: 600; margin: 0; letter-spacing: -0.015em; }
+h3 { font-size: 15px; line-height: 1.4; font-weight: 600; margin: 0 0 14px; color: var(--ink); }
+
+.mut { color: var(--mut); }
+.ok { color: var(--ok); }
+.bad { color: var(--bad); }
+.num { font-variant-numeric: tabular-nums; text-align: right; }
+[hidden] { display: none !important; }
+
+/* Navigation Header */
+header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  padding: 0 28px;
+  height: 60px;
+  background: rgba(16, 22, 31, 0.9);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--line);
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.brand-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--acc);
+  box-shadow: 0 0 10px var(--acc);
+}
+#tabs { display: flex; gap: 6px; flex: 1; }
+#tabs a {
+  padding: 7px 14px;
+  border-radius: 8px;
+  color: var(--mut);
+  text-decoration: none;
+  font-weight: 500;
+  transition: all 0.15s ease;
+}
+#tabs a:hover { color: var(--ink); background: var(--s2); }
+#tabs a.on { color: var(--ink); background: var(--accbg); color: var(--acc); }
+
+main {
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 20px 24px 72px;
+}
+
+.head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.head p { margin: 6px 0 0; font-size: 13.5px; }
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--mut);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+.back-link:hover { color: var(--ink); }
+
+/* Cards & Tables */
+.card {
+  background: var(--s1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 22px;
+  margin-bottom: 22px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+}
+.card.flush { padding: 0; overflow: hidden; }
+.card > .bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 22px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(22, 31, 44, 0.45);
+}
+.bar h3 { margin: 0; }
+
+table { width: 100%; border-collapse: collapse; }
+th, td {
+  padding: 13px 18px;
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--line-soft);
+}
+th {
+  background: var(--s2);
+  color: var(--mut);
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+th.num { text-align: right; }
+tbody tr:last-child td { border-bottom: 0; }
+tbody tr { transition: background 0.12s ease; }
+tbody tr:hover { background: rgba(91, 156, 245, 0.04); }
+tr.link { cursor: pointer; }
+tr.editing { background: rgba(91, 156, 245, 0.09); }
+td.act { white-space: nowrap; text-align: right; }
+td.act button { margin-left: 6px; }
+
+.sub { font-size: 12.5px; margin-top: 4px; line-height: 1.4; }
+.sub.issue { color: var(--bad); }
+.sub.incomplete { color: var(--warn); }
+.sub.done { color: var(--mut); }
+
+/* Form Controls */
+input, select, textarea, button {
+  font: inherit;
+  color: var(--ink);
+  background: var(--s2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 12px;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+input::placeholder { color: #5c6c82; }
+input:focus, select:focus {
+  border-color: var(--acc);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(91, 156, 245, 0.16);
+}
+button {
+  cursor: pointer;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+button:hover { background: var(--s3); border-color: #32435b; }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+button.pri {
+  background: var(--acc);
+  border-color: var(--acc);
+  color: #06101d;
+  font-weight: 600;
+}
+button.pri:hover { background: var(--acc-hover); border-color: var(--acc-hover); }
+button.danger {
+  background: var(--badbg);
+  border-color: rgba(240, 106, 98, 0.35);
+  color: var(--bad);
+}
+button.danger:hover { background: rgba(240, 106, 98, 0.24); }
+button.sm { padding: 5px 11px; font-size: 12.5px; border-radius: 7px; }
+
+label {
+  display: grid;
+  gap: 6px;
+  color: var(--mut);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.row { display: flex; gap: 14px; flex-wrap: wrap; align-items: end; }
+.row.end { justify-content: flex-end; }
+.grow { flex: 1; min-width: 180px; }
+
+/* Badges & Status Pills */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  background: var(--s2);
+  color: var(--mut);
+  white-space: nowrap;
+}
+.pill.reimbursement { background: var(--accbg); color: var(--acc); }
+.pill.chargeback { background: var(--purbg); color: var(--pur); }
+.pill.ok { background: var(--okbg); color: var(--ok); }
+.pill.warn { background: var(--warnbg); color: var(--warn); }
+.pill.bad { background: var(--badbg); color: var(--bad); }
+
+select.st {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+select.st.done { background: var(--okbg); color: var(--ok); border-color: rgba(56, 193, 130, 0.35); }
+select.st.incomplete { background: var(--warnbg); color: var(--warn); border-color: rgba(229, 169, 59, 0.35); }
+select.st.issue { background: var(--badbg); color: var(--bad); border-color: rgba(240, 106, 98, 0.35); }
+
+/* Workspace Split Layout */
+.split {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 18px;
+  align-items: start;
+}
+@media (max-width: 960px) { .split { grid-template-columns: 1fr; } }
+
+aside {
+  padding: 0;
+  overflow: hidden;
+  position: sticky;
+  top: 84px;
+}
+aside .search-wrap {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line-soft);
+}
+aside input { width: 100%; font-size: 13px; padding: 6px 10px; }
+
+ul { list-style: none; margin: 0; padding: 0; max-height: 75vh; overflow: auto; }
+li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line-soft);
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+li:last-child { border-bottom: 0; }
+li:hover { background: var(--s2); }
+li.sel { background: var(--accbg); box-shadow: inset 3px 0 0 var(--acc); }
+li small { display: block; color: var(--mut); font-size: 11.5px; margin-top: 2px; }
+li .num { font-size: 12px; color: var(--mut); line-height: 1.4; }
+
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 7px;
+}
+.dot.issue { background: var(--bad); }
+.dot.incomplete { background: var(--warn); }
+
+/* Summary Stat Cards */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 16px;
+}
+.stat {
+  background: var(--s2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 18px;
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+.stat span { color: var(--mut); font-size: 12.5px; font-weight: 500; }
+.stat b { font-size: 28px; line-height: 1.15; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.stat.off { opacity: 0.42; }
+
+/* Inline Editing Inputs */
+td input[data-f="note"], td input[data-f="statusNote"] {
+  width: 100%;
+  margin-bottom: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+td input[data-f="statusNote"] { margin-bottom: 0; }
+td input[data-f="amount"] { width: 115px; text-align: right; padding: 6px 10px; }
+td select[data-f="kind"], td select[data-f="status"] { padding: 6px 10px; font-size: 13px; }
+
+/* Modals & Toasts */
+dialog {
+  background: var(--s1);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 24px;
+  width: min(440px, 92vw);
+  box-shadow: var(--shadow);
+}
+dialog::backdrop { background: rgba(0, 0, 0, 0.65); backdrop-filter: blur(3px); }
+dialog form { display: grid; gap: 16px; }
+dialog p { margin: 0; font-size: 13.5px; }
+
+#toasts {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  display: grid;
+  gap: 10px;
+  z-index: 30;
+}
+.toast {
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: var(--s2);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  max-width: 380px;
+  white-space: pre-line;
+  font-size: 13.5px;
+}
+.toast.bad { border-color: rgba(240, 106, 98, 0.45); color: var(--bad); }
+.toast.ok { border-color: rgba(56, 193, 130, 0.45); color: var(--ink); }
+
+/* Slice 3: escrow, zones, termination */
+.pill.escrow { background: var(--okbg); color: var(--ok); }
+.pill.escrow_charge { background: var(--warnbg); color: var(--warn); }
+.pill.leaving_charge { background: var(--badbg); color: var(--bad); }
+.pill.zone-red { background: var(--badbg); color: var(--bad); }
+.pill.zone-yellow { background: var(--warnbg); color: var(--warn); }
+li .pill.zone-red, li .pill.zone-yellow, td .pill.zone-red, td .pill.zone-yellow { margin-left: 6px; font-size: 11px; padding: 1px 8px; }
+#wb { margin-left: 6px; }
+.card.zone-red { border-color: rgba(240, 106, 98, 0.5); background: rgba(240, 106, 98, 0.07); }
+.card.zone-yellow { border-color: rgba(229, 169, 59, 0.5); background: rgba(229, 169, 59, 0.07); }
+.card.zone-red, .card.zone-yellow { padding: 14px 18px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.stat .btns { display: flex; gap: 6px; flex-wrap: wrap; }
+button.ghost { background: transparent; border-color: transparent; color: var(--mut); padding: 2px 8px; font-size: 12px; margin-left: 6px; }
+button.ghost:hover { color: var(--ink); background: var(--s3); }
+.pad { padding: 18px 22px; }
+dialog.wide { width: min(680px, 94vw); max-height: 92vh; overflow: auto; }
+.tbox { border: 1px solid var(--line); border-radius: 10px; padding: 14px; background: var(--s2); display: grid; gap: 8px; }
+.tbox h4 { margin: 0; font-size: 13px; }
+.kv { display: flex; justify-content: space-between; gap: 12px; font-variant-numeric: tabular-nums; }
+.kv.big { font-weight: 600; border-top: 1px solid var(--line); padding-top: 8px; }
+
+/* Embedded Login Screen */
+#login {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: radial-gradient(circle at 50% 0%, #141e2c 0%, var(--bg) 65%);
+}
+.login-card {
+  width: min(400px, 100%);
+  background: var(--s1);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 34px;
+  display: grid;
+  gap: 18px;
+  box-shadow: var(--shadow);
+}
+.login-header { display: grid; gap: 6px; }
+.login-card button { padding: 11px; margin-top: 4px; font-size: 14.5px; }
+
+/* Report Reference Pill */
+.ref-pill {
+  background: rgba(91, 156, 245, 0.12);
+  border: 1px solid rgba(91, 156, 245, 0.35);
+  color: var(--acc);
+  cursor: pointer;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11.5px;
+  padding: 3px 8px;
+  gap: 5px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  transition: all 0.15s ease;
+  user-select: none;
+  font-weight: 600;
+}
+.ref-pill:hover {
+  background: rgba(91, 156, 245, 0.28);
+  border-color: var(--acc);
+  color: #fff;
+  transform: translateY(-1px);
+}
+.ref-pill:active { transform: translateY(0); }
+
+/* 1-Click Copy Buttons */
+.copy-btn {
+  background: var(--s2);
+  border: 1px solid var(--line);
+  color: var(--mut);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+.copy-btn:hover {
+  background: var(--s3);
+  border-color: var(--acc);
+  color: var(--ink);
+}
+.copy-btn:active {
+  transform: translateY(1px);
+}
+
+/* Sub-Page Navigation Tabs (Ledger & Payouts vs Escrow Plan) */
+.subpage-nav {
+  display: inline-flex;
+  background: var(--s2);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 3px;
+  gap: 3px;
+}
+.subpage-btn {
+  padding: 7px 15px;
+  border-radius: 7px;
+  border: 0;
+  background: transparent;
+  color: var(--mut);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.subpage-btn:hover { color: var(--ink); background: var(--s3); }
+.subpage-btn.active {
+  background: var(--acc);
+  color: #06101d;
+  font-weight: 600;
+}
+
+/* Overall Balance Card */
+.balance-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 16px;
+}
+.balance-box {
+  background: var(--s2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  position: relative;
+}
+.balance-box .lbl {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--mut);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.balance-box .val {
+  font-size: 26px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+.balance-box.net-pos {
+  border-color: rgba(56, 193, 130, 0.4);
+  background: rgba(56, 193, 130, 0.08);
+}
+.balance-box.net-neg {
+  border-color: rgba(240, 106, 98, 0.4);
+  background: rgba(240, 106, 98, 0.08);
+}
+
+/* Escrow Bottom Banner */
+.escrow-summary-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  background: rgba(56, 193, 130, 0.06);
+  border: 1px solid rgba(56, 193, 130, 0.22);
+  border-radius: 10px;
+  margin-top: 18px;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+/* Party Tabs (Driver vs Owner vs Combined) */
+.party-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.party-tab {
+  padding: 8px 16px;
+  border-radius: 8px;
+  background: var(--s2);
+  border: 1px solid var(--line);
+  color: var(--mut);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.15s ease;
+}
+.party-tab:hover {
+  color: var(--ink);
+  background: var(--s3);
+}
+.party-tab.active {
+  background: var(--accbg);
+  border-color: var(--acc);
+  color: var(--acc);
+  font-weight: 600;
+}
+.party-badge {
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.party-badge.driver { background: rgba(56, 193, 130, 0.16); color: var(--ok); }
+.party-badge.owner { background: rgba(182, 154, 247, 0.16); color: var(--pur); }
+
+/* Escrow Carousel */
+.esc-carousel {
+  display: grid;
+  gap: 12px;
+}
+.esc-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--s2);
+  border-radius: 8px;
+}
+.esc-strip {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  scrollbar-width: thin;
+}
+.esc-chip {
+  padding: 5px 11px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 500;
+  background: var(--s2);
+  border: 1px solid var(--line);
+  color: var(--mut);
+  cursor: pointer;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s ease;
+}
+.esc-chip:hover { border-color: var(--acc); color: var(--ink); }
+.esc-chip.sel {
+  border-color: var(--acc);
+  background: var(--accbg);
+  color: var(--acc);
+  font-weight: 600;
+}
+.esc-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--s2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px 20px;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+/* View Toggle (This Week vs All Time) */
+.view-toggle {
+  display: inline-flex;
+  background: var(--s2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 3px;
+  gap: 4px;
+}
+.view-toggle button {
+  background: transparent;
+  border: 0;
+  padding: 4px 12px;
+  font-size: 12.5px;
+  border-radius: 6px;
+  color: var(--mut);
+}
+.view-toggle button.active {
+  background: var(--acc);
+  color: #06101d;
+  font-weight: 600;
+}
+</style>
+</head>
+<body>
+
+<div id="login" hidden>
+  <form id="lf" class="login-card">
+    <div class="login-header">
+      <div class="brand"><span class="brand-dot"></span><span>Fleet Reconciliation</span></div>
+      <p class="mut" style="margin:4px 0 0">Sign in to manage dispatch ledger &amp; driver payouts</p>
+    </div>
+    <label>Username
+      <input name="user" autocomplete="username" placeholder="Enter your username" required autofocus>
+    </label>
+    <label>Password
+      <input name="password" type="password" autocomplete="current-password" placeholder="••••••••" required>
+    </label>
+    <div id="lerr" class="bad" style="font-size:13px" role="alert"></div>
+    <button class="pri">Sign in</button>
+  </form>
+</div>
+
+<div id="shell" hidden>
+  <header>
+    <div class="brand"><span class="brand-dot"></span><span>Reconciliation</span></div>
+    <nav id="tabs">
+      <a href="#/" data-t="weeks">Billing Weeks</a>
+      <a href="#/units" data-t="units">Units &amp; Drivers</a>
+      <a href="#/archive" data-t="archive">Archive</a>
+      <a href="#/watch" data-t="watch">Watchlist<span id="wb"></span></a>
+    </nav>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:10px">
+      <button class="sm" id="btnSyncTg" title="Scan Telegram groups for missed messages and backfill them" style="display:inline-flex;align-items:center;gap:5px;background:var(--s2);border-color:var(--line)">
+        🔄 Sync Telegram
+      </button>
+      <span id="me" class="mut" style="font-size:13px"></span>
+      <button class="sm" id="out">Sign out</button>
+    </div>
+  </header>
+  <main id="app"></main>
+</div>
+
+<dialog id="dlg"></dialog>
+<div id="toasts" aria-live="polite"></div>
+
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+// Plain decimal formatting without comma thousands separator (e.g. 1234.70, not 1,234.70)
+const numFmt = c => (Number(c || 0) / 100).toFixed(2);
+
+const day = d => new Date(d + 'T00:00:00Z').toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short', timeZone: 'UTC' }).replace(',', '');
+const plus6 = d => new Date(Date.parse(d + 'T00:00:00Z') + 6 * 864e5).toISOString().slice(0, 10);
+const addWeeks = (w, n) => new Date(Date.parse(w + 'T00:00:00Z') + n * 7 * 864e5).toISOString().slice(0, 10);
+const range = (a, b) => `${day(a)} – ${day(b)}`;
+
+const toCents = raw => {
+  let s = String(raw ?? '').trim().replace(/^\$\s*/, '').replace(/\s+/g, '');
+  if (!s) return null;
+  if (/^\d+,\d{1,2}$/.test(s)) {
+    s = s.replace(',', '.');
+  }
+  s = s.replace(/,/g, '');
+  if (!/^\d+(\.\d{1,2})?$/.test(s)) return null;
+  const [w, f = ''] = s.split('.');
+  const c = Number(w) * 100 + Number(f.padEnd(2, '0'));
+  return Number.isSafeInteger(c) && c > 0 ? c : null;
+};
+
+const STAT = { done: 'Done', incomplete: 'Incomplete', issue: 'Issue' };
+const KIND = { reimbursement: 'Reimbursement', chargeback: 'Chargeback', escrow: 'Escrow', escrow_charge: 'Escrow charge', leaving_charge: 'Leaving charge' };
+const KIND_NEW = { reimbursement: 'Reimbursement', chargeback: 'Chargeback' }; // what can be typed in the Add Entry form
+const STAT_ESC = { done: 'Paid', incomplete: 'Pending', issue: 'Held back' };
+const statFor = k => (k === 'escrow' ? STAT_ESC : STAT);
+const zonePill = z => (!z || z.level === 'green' ? '' : `<span class="pill zone-${z.level}" title="${esc(z.reasons.join(' · '))}">${z.level === 'red' ? 'Red zone' : 'Yellow zone'}</span>`);
+const opts = (o, sel) => Object.entries(o).map(([v, l]) => `<option value="${v}"${v === sel ? ' selected' : ''}>${l}</option>`).join('');
+
+const openPill = x =>
+  x.issues
+    ? `<span class="pill bad">${x.issues} issue${x.issues > 1 ? 's' : ''}</span> ` + (x.incomplete ? `<span class="pill warn">${x.incomplete} incomplete</span>` : '')
+    : x.incomplete
+    ? `<span class="pill warn">${x.incomplete} incomplete</span>`
+    : x.entries
+    ? '<span class="pill ok">All done</span>'
+    : '<span class="mut">—</span>';
+
+async function api(path, method = 'GET', body) {
+  const r = await fetch('/api' + path, {
+    method,
+    headers: body ? { 'Content-Type': 'application/json' } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const j = await r.json().catch(() => ({}));
+  if (r.status === 401 && path !== '/login') {
+    showLogin();
+    throw new Error('Signed out');
+  }
+  if (!r.ok) throw new Error((j.errors?.length ? j.errors.join('\n') : j.error) || r.statusText);
+  return j;
+}
+
+function toast(msg, kind = 'ok') {
+  const t = document.createElement('div');
+  t.className = 'toast ' + kind;
+  t.textContent = msg;
+  $('#toasts').append(t);
+  setTimeout(() => t.remove(), 4000);
+}
+
+function ask({ title, body = '', label, confirm = 'Confirm', danger = false }) {
+  return new Promise(res => {
+    const d = $('#dlg');
+    d.className = '';
+    d.innerHTML = `<form method="dialog">
+      <h3 style="margin:0">${esc(title)}</h3>
+      ${body ? `<p class="mut">${esc(body)}</p>` : ''}
+      ${label ? `<label>${esc(label)}<input name="v" autocomplete="off" required></label>` : ''}
+      <div class="row end">
+        <button value="cancel" formnovalidate>Cancel</button>
+        <button value="ok" class="${danger ? 'danger' : 'pri'}">${esc(confirm)}</button>
+      </div>
+    </form>`;
+    d.returnValue = '';
+    d.onclose = () => res(d.returnValue === 'ok' ? (label ? d.querySelector('input').value.trim() : true) : null);
+    d.showModal();
+  });
+}
+
+// Dialog with several required inputs: fields = [{ name, label, placeholder, inputmode }]
+function askForm({ title, body = '', fields, confirm = 'Confirm', danger = false }) {
+  return new Promise(res => {
+    const d = $('#dlg');
+    d.className = '';
+    d.innerHTML = `<form method="dialog">
+      <h3 style="margin:0">${esc(title)}</h3>
+      ${body ? `<p class="mut">${esc(body)}</p>` : ''}
+      ${fields.map(f => `<label>${esc(f.label)}<input name="${f.name}" placeholder="${esc(f.placeholder || '')}" ${f.inputmode ? `inputmode="${f.inputmode}"` : ''} autocomplete="off" required></label>`).join('')}
+      <div class="row end">
+        <button value="cancel" formnovalidate>Cancel</button>
+        <button value="ok" class="${danger ? 'danger' : 'pri'}">${esc(confirm)}</button>
+      </div>
+    </form>`;
+    d.returnValue = '';
+    d.onclose = () => res(d.returnValue === 'ok' ? Object.fromEntries(fields.map(f => [f.name, d.querySelector(`[name=${f.name}]`).value.trim()])) : null);
+    d.showModal();
+  });
+}
+
+async function copyText(text, btn) {
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(`Copied: ${text}`);
+    if (btn) {
+      const was = btn.innerHTML;
+      btn.innerHTML = 'Copied ✓';
+      setTimeout(() => (btn.innerHTML = was), 1500);
+    }
+  } catch (e) {
+    prompt('Copy code to clipboard:', text);
+  }
+}
+
+function divideDialog(entry, currentWeek) {
+  return new Promise(resolve => {
+    const d = $('#dlg');
+    d.className = '';
+    const total = entry.amountCents;
+    d.innerHTML = `<form method="dialog" id="splitForm">
+      <h3 style="margin:0">Divide Charge: ${numFmt(total)}</h3>
+      <p class="mut" style="margin:4px 0 14px">Split a large charge across multiple consecutive weeks so the driver can pay over time.</p>
+      <div style="font-size:13px;background:var(--s2);padding:10px 14px;border-radius:8px;border:1px solid var(--line);margin-bottom:14px;display:grid;gap:4px">
+        <div><b>Description:</b> ${esc(entry.note || 'No note')}</div>
+        ${entry.sourceRef ? `<div><b>Report Reference #:</b> <code>${esc(entry.sourceRef)}</code></div>` : ''}
+        <div><b>Total Amount:</b> ${numFmt(total)}</div>
+      </div>
+      <label>Number of weeks (at least 2)
+        <input name="weeks" type="number" min="2" max="52" value="2" required autofocus>
+      </label>
+      <label>Start from week
+        <select name="startWeek">
+          <option value="${entry.weekStart}">Entry week (${entry.weekStart})</option>
+          <option value="${currentWeek}" ${currentWeek !== entry.weekStart ? 'selected' : ''}>Current week (${currentWeek})</option>
+          <option value="${plus6(currentWeek)}">Next week</option>
+        </select>
+      </label>
+      <div id="splitPreview" style="font-size:12.5px;color:var(--acc);margin-top:8px;min-height:36px;line-height:1.4"></div>
+      <div class="row end" style="margin-top:16px">
+        <button value="cancel" formnovalidate>Cancel</button>
+        <button value="ok" class="pri" id="splitConfirm">Divide Charge</button>
+      </div>
+    </form>`;
+
+    const updatePreview = () => {
+      const w = parseInt(d.querySelector('[name=weeks]').value, 10);
+      const prevEl = d.querySelector('#splitPreview');
+      if (!w || w < 2) {
+        prevEl.textContent = 'Enter at least 2 weeks (2 to 52)';
+        return;
+      }
+      const base = Math.floor(total / w);
+      const rem = total - base * w;
+      const last = base + rem;
+      prevEl.innerHTML = `<b>Calculation:</b> ${w} weekly installments of <b>${numFmt(base)}</b>${rem ? ` (last week: <b>${numFmt(last)}</b>)` : ''}. Total: <b>${numFmt(total)}</b>.`;
+    };
+
+    d.querySelector('[name=weeks]').oninput = updatePreview;
+    updatePreview();
+
+    d.returnValue = '';
+    d.onclose = () => {
+      if (d.returnValue === 'ok') {
+        const weeks = parseInt(d.querySelector('[name=weeks]').value, 10);
+        const startWeek = d.querySelector('[name=startWeek]').value;
+        resolve({ weeks, startWeek });
+      } else {
+        resolve(null);
+      }
+    };
+    d.showModal();
+  });
+}
+
+function telegramDialog(defaultUnit = '') {
+  return new Promise(resolve => {
+    const d = $('#dlg');
+    d.className = 'wide';
+    d.innerHTML = `<form method="dialog" id="tgForm">
+      <h3 style="margin:0">Paste Telegram EFS / Charge Message</h3>
+      <p class="mut" style="margin:4px 0 14px">Paste the message received on Telegram. The system will automatically extract the Report Reference #, Money Transfer code, Amount, Vendor, and Notes.</p>
+      <label>Telegram message text
+        <textarea name="text" rows="4" placeholder="• Money Transfer code 2344953349,  Report Reference # 166475152,  Amount 573.73,  Issued to Southern Tire Mart, AL,  Notes ALTUM 304 Byron oil change." style="width:100%;font-size:13px;resize:vertical;font-family:inherit" required autofocus></textarea>
+      </label>
+      <div id="tgPreview" style="background:var(--s2);border:1px solid var(--line);border-radius:8px;padding:12px;display:none;margin-top:12px;font-size:13px;line-height:1.5"></div>
+      <div class="row end" style="margin-top:16px">
+        <button value="cancel" formnovalidate>Cancel</button>
+        <button value="ok" class="pri" id="tgApply" disabled>Fill Entry Form</button>
+      </div>
+    </form>`;
+
+    let parsed = null;
+    const txtArea = d.querySelector('textarea');
+    const prev = d.querySelector('#tgPreview');
+    const btn = d.querySelector('#tgApply');
+
+    txtArea.oninput = async () => {
+      const text = txtArea.value.trim();
+      if (!text) {
+        prev.style.display = 'none';
+        btn.disabled = true;
+        return;
+      }
+      try {
+        const res = await api('/parse-telegram', 'POST', { text });
+        parsed = res.data;
+        if (parsed.amount || parsed.refCode || parsed.combinedNote) {
+          prev.style.display = 'block';
+          btn.disabled = false;
+          prev.innerHTML = `
+            <div style="font-weight:600;color:var(--ok);margin-bottom:6px">✓ Extracted Data:</div>
+            <div><b>Amount:</b> ${parsed.amount ? numFmt(parsed.amountCents || 0) : '<span class="bad">Not found</span>'}</div>
+            <div><b>Report Reference #:</b> ${parsed.refCode ? `<code>${esc(parsed.refCode)}</code>` : '<span class="mut">None</span>'}</div>
+            ${parsed.moneyTransferCode && parsed.moneyTransferCode !== parsed.refCode ? `<div><b>Money Transfer Code:</b> <code>${esc(parsed.moneyTransferCode)}</code></div>` : ''}
+            <div><b>Description:</b> ${esc(parsed.combinedNote || '')}</div>
+            ${parsed.unit ? `<div><b>Detected Truck Unit:</b> Unit ${esc(parsed.unit)}</div>` : ''}
+          `;
+        }
+      } catch (e) {
+        prev.style.display = 'none';
+        btn.disabled = true;
+      }
+    };
+
+    d.returnValue = '';
+    d.onclose = () => {
+      d.className = '';
+      resolve(d.returnValue === 'ok' ? parsed : null);
+    };
+    d.showModal();
+  });
+}
+
+// ───────── Login ─────────
+function showLogin() {
+  clearInterval(timer);
+  $('#shell').hidden = true;
+  $('#login').hidden = false;
+  $('#lf').reset();
+  $('#lf [name=user]')?.focus();
+}
+
+$('#lf').onsubmit = async e => {
+  e.preventDefault();
+  $('#lerr').textContent = '';
+  try {
+    const u = await api('/login', 'POST', Object.fromEntries(new FormData(e.target)));
+    enter(u.user);
+  } catch (err) {
+    $('#lerr').textContent = err.message;
+  }
+};
+
+$('#out').onclick = async () => {
+  await api('/logout', 'POST').catch(() => {});
+  showLogin();
+};
+
+$('#btnSyncTg').onclick = async () => {
+  const btn = $('#btnSyncTg');
+  btn.disabled = true;
+  btn.textContent = '⏳ Syncing...';
+  try {
+    const res = await api('/telegram/sync', 'POST');
+    if (res.newEntries > 0) {
+      toast(`Synced ${res.newEntries} new entries from Telegram!`);
+      route();
+    } else {
+      toast('All caught up! No unadded Telegram messages found.');
+    }
+  } catch (err) {
+    toast('Sync failed: ' + (err.message || err));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔄 Sync Telegram';
+  }
+};
+
+function enter(user) {
+  $('#me').textContent = user;
+  $('#login').hidden = true;
+  $('#shell').hidden = false;
+  route();
+}
+
+// ───────── Router ─────────
+let timer, filter = '', editing = null, pendingStatus = null;
+const poll = fn => { timer = setInterval(() => fn().catch(() => {}), 15000); };
+
+function route() {
+  clearInterval(timer);
+  editing = pendingStatus = null;
+  const [, a, b, , c] = location.hash.split('/');
+  document.querySelectorAll('#tabs a').forEach(x => x.classList.toggle('on', x.dataset.t === (a === 'w' || !a ? 'weeks' : a)));
+  const view =
+    a === 'w' && b
+      ? () => workspace(b, c && decodeURIComponent(c))
+      : a === 'watch'
+      ? watchView
+      : a === 'units'
+      ? unitsView
+      : a === 'archive'
+      ? () => archiveView(b && decodeURIComponent(b))
+      : weeksView;
+
+  api('/watchlist').then(w => {
+    const red = w.items.filter(x => x.level === 'red').length;
+    $('#wb').textContent = w.items.length ? w.items.length : '';
+    $('#wb').className = w.items.length ? 'pill zone-' + (red ? 'red' : 'yellow') : '';
+  }).catch(() => {});
+  Promise.resolve(view()).catch(e => {
+    if (e.message !== 'Signed out') $('#app').innerHTML = `<div class="card bad">${esc(e.message)}</div>`;
+  });
+}
+addEventListener('hashchange', route);
+
+// ───────── Level 1: Billing Weeks ─────────
+async function weeksView() {
+  const paint = async () => {
+    const ws = await api('/weeks');
+    $('#app').innerHTML = `
+      <div class="head">
+        <div>
+          <h1>Billing Weeks</h1>
+          <p class="mut">Monday to Sunday, US Eastern Time</p>
+        </div>
+      </div>
+      <div class="card flush">
+        <table>
+          <thead>
+            <tr>
+              <th>Week Period</th>
+              <th class="num">Reimbursements</th>
+              <th class="num">Chargebacks</th>
+              <th>Open Items</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${ws.map(w => `
+              <tr class="link" tabindex="0" onclick="location.hash='#/w/${w.weekStart}'" onkeydown="if(event.key==='Enter')this.click()">
+                <td><b>${range(w.weekStart, w.weekEnd)}</b></td>
+                <td class="num">${numFmt(w.reimbursements)}</td>
+                <td class="num">${numFmt(w.chargebacks)}</td>
+                <td>${openPill(w)}</td>
+                <td>${w.current ? '<span class="pill warn">Current week</span>' : w.upcoming ? '<span class="pill">Upcoming</span>' : '<span class="pill">Past</span>'}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  };
+  await paint();
+  poll(paint);
+}
+
+// ───────── Levels 2+3: Workspace ─────────
+async function workspace(ws, selected) {
+  let list, detail, ep;
+  let activeParty = 'driver'; // 'driver' | 'owner' | 'all'
+  let subpage = 'ledger'; // 'ledger' | 'escrow'
+  let ledgerMode = 'week'; // 'week' | 'lifetime'
+  let escrowIdx = -1;
+  let showFullEscrowTable = false;
+
+  $('#app').innerHTML = `
+    <div class="head">
+      <div>
+        <a class="back-link" href="#/">← Back to Billing Weeks</a>
+        <h1>${range(ws, plus6(ws))}</h1>
+      </div>
+    </div>
+    <div class="split">
+      <aside class="card">
+        <div class="search-wrap">
+          <input id="q" placeholder="Filter units or drivers ( / )" autocomplete="off">
+        </div>
+        <ul id="ul"></ul>
+      </aside>
+      <section>
+        <div id="data"><div class="card mut">Select a unit on the left to inspect or record entries.</div></div>
+      </section>
+    </div>`;
+  $('#q').value = filter;
+
+  const paintList = () => {
+    const f = filter.trim().toLowerCase();
+    const shown = list.units.filter(
+      u =>
+        !f ||
+        u.unit.toLowerCase().includes(f) ||
+        u.driver.toLowerCase().includes(f) ||
+        (u.owner && u.owner.toLowerCase().includes(f))
+    );
+    $('#ul').innerHTML =
+      shown
+        .map(
+          u => `
+          <li data-u="${esc(u.unit)}" class="${u.unit === selected ? 'sel' : ''}">
+            <span>
+              ${u.issues ? '<i class="dot issue"></i>' : u.incomplete ? '<i class="dot incomplete"></i>' : ''}
+              <b>Unit ${esc(u.unit)}</b>${u.archived ? ' <span class="pill">Terminated</span>' : ''}${zonePill(u.zone)}
+              <small>${esc(u.driver)}${u.owner ? ` · Owner: ${esc(u.owner)}` : ''}</small>
+            </span>
+            <span class="num">${numFmt(u.reimbursements)}<br>${numFmt(u.chargebacks)}</span>
+          </li>`
+        )
+        .join('') || '<li class="mut">No matching unit</li>';
+  };
+
+  const viewRow = e => {
+    const isOwner = e.party === 'owner';
+    const isCharge = e.kind === 'chargeback' || e.kind === 'leaving_charge' || e.kind === 'escrow_charge';
+    const isReimb = e.kind === 'reimbursement';
+    const amtStr = (Number(e.amountCents || 0) / 100).toFixed(2);
+    return `
+    <tr data-id="${e.id}">
+      <td class="mut" style="white-space:nowrap">
+        ${day(e.eventDate || e.createdAt.slice(0, 10))}
+        ${ledgerMode === 'lifetime' ? `<div class="sub mut" style="font-size:11px">${range(e.weekStart, plus6(e.weekStart))}</div>` : ''}
+      </td>
+      <td>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span>${esc(e.note) || '<span class="mut">No description</span>'}</span>
+          ${e.note ? `<button type="button" class="copy-btn sm" data-copy="${esc(e.note)}" title="Click to copy description">📋 Copy</button>` : ''}
+        </div>
+        ${e.statusNote ? `<div class="sub ${e.status}">${esc(e.statusNote)}</div>` : ''}
+      </td>
+      <td style="white-space:nowrap">
+        ${e.sourceRef ? `<span class="ref-pill" data-copy="${esc(e.sourceRef)}" title="Click to copy Report Reference #">📋 <b>${esc(e.sourceRef)}</b></span>` : '<span class="mut">—</span>'}
+      </td>
+      <td class="num" style="white-space:nowrap">
+        <div style="display:inline-flex;align-items:center;gap:6px;justify-content:flex-end">
+          <b class="${isReimb ? 'ok' : ''}">${isReimb ? '+' : '−'}${numFmt(e.amountCents)}</b>
+          <button type="button" class="copy-btn sm" data-copy="${amtStr}" title="Click to copy amount (${amtStr})">📋 Copy</button>
+        </div>
+      </td>
+      <td style="white-space:nowrap">
+        <span class="party-badge ${isOwner ? 'owner' : 'driver'}">${isOwner ? 'Owner' : 'Driver'}</span>
+      </td>
+      <td style="white-space:nowrap">
+        <select class="st ${e.status}" data-st aria-label="Status">${opts(statFor(e.kind), e.status)}</select>
+      </td>
+      <td class="act" style="white-space:nowrap">
+        ${isCharge && e.status !== 'done' ? `<button class="sm pri" data-split="${e.id}" title="Divide this large charge into multiple weeks">Divide</button>` : ''}
+        <button class="sm" data-edit>Edit</button>
+        <button class="sm" data-void>Void</button>
+      </td>
+    </tr>`;
+  };
+
+  const editRow = e => `
+    <tr class="editing" data-id="${e.id}">
+      <td class="mut" style="white-space:nowrap">${day(e.eventDate || e.createdAt.slice(0, 10))}</td>
+      <td>
+        <input data-f="note" value="${esc(e.note)}" placeholder="Entry description" style="width:100%">
+        <input data-f="statusNote" value="${esc(e.statusNote)}" placeholder="Operational note (required if Issue)" style="width:100%;margin-top:4px">
+      </td>
+      <td style="white-space:nowrap">
+        <input data-f="sourceRef" value="${esc(e.sourceRef || '')}" placeholder="Report Ref #" style="width:125px">
+      </td>
+      <td class="num" style="white-space:nowrap">
+        <input data-f="amount" value="${(e.amountCents / 100).toFixed(2)}" inputmode="decimal" style="width:100px;text-align:right">
+      </td>
+      <td style="white-space:nowrap">
+        <div style="display:grid;gap:6px">
+          ${e.kind === 'reimbursement' || e.kind === 'chargeback' ? `<select data-f="kind">${opts(KIND_NEW, e.kind)}</select>` : `<span class="pill ${e.kind}">${KIND[e.kind]}</span>`}
+          <select data-f="party">
+            <option value="driver"${(e.party || 'driver') === 'driver' ? ' selected' : ''}>Driver</option>
+            <option value="owner"${e.party === 'owner' ? ' selected' : ''}>Owner</option>
+          </select>
+        </div>
+      </td>
+      <td style="white-space:nowrap"><select data-f="status">${opts(statFor(e.kind), pendingStatus || e.status)}</select></td>
+      <td class="act" style="white-space:nowrap">
+        <button class="pri sm" data-save>Save</button>
+        <button class="sm" data-cancel>Cancel</button>
+      </td>
+    </tr>`;
+
+  const STATE = { paid: ['ok', 'Paid'], pending: ['warn', 'Pending'], held: ['bad', 'Held back'], skipped: ['', 'Skipped'], upcoming: ['', 'Scheduled'], closed: ['', '—'] };
+
+  const renderEscrowSubpage = () => {
+    if (!ep || !ep.plan || ep.plan.status === 'cancelled') {
+      return `
+        <div class="card" style="padding:22px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+            <h3 style="margin:0">Set Up Escrow Plan</h3>
+            <button type="button" class="sm" data-subpage="ledger">← Back to Ledger</button>
+          </div>
+          <p class="mut" style="margin:0 0 16px">Enter the total escrow deposit once. Each week a deduction is scheduled, and the carousel tracks paid, pending, and held installments.</p>
+          <div class="row" style="gap:12px;align-items:end">
+            <label style="width:140px">Escrow Total ($)<input id="esT" placeholder="1200.00" inputmode="decimal"></label>
+            <label style="width:100px">Weeks<input id="esW" value="12" inputmode="numeric"></label>
+            <label style="width:140px">Starts<select id="esS"><option value="current">This week</option><option value="next">Next week</option></select></label>
+            <label class="grow">Note<input id="esN" placeholder="Optional (e.g. Driver security deposit)"></label>
+            <button id="esGo" class="pri" style="height:36px;padding:0 18px">Start Escrow</button>
+          </div>
+          <div id="esP" class="mut" style="margin-top:10px;min-height:18px;font-size:12.5px"></div>
+        </div>
+      `;
+    }
+
+    const p = ep.plan, st = ep.stats, closed = p.status !== 'active';
+    const sched = ep.schedule;
+    if (escrowIdx === -1) {
+      const curIdx = sched.findIndex(r => r.current);
+      escrowIdx = curIdx >= 0 ? curIdx : 0;
+    }
+    const curItem = sched[escrowIdx] || sched[0] || { n: 1, weekStart: p.startWeek, weekEnd: plus6(p.startWeek), amountCents: 0, scheduledCents: 0, state: 'upcoming', statusNote: '' };
+
+    return `
+      <div class="card flush" style="margin-bottom:20px">
+        <div class="bar">
+          <div>
+            <h3 style="margin:0">Escrow Management${closed ? ' · Closed at termination' : ''}</h3>
+            <span class="mut" style="font-size:12px">${p.weeks} weekly payments from ${p.startWeek}</span>
+          </div>
+          <div class="row" style="gap:8px">
+            ${!closed && !detail.archived ? '<button type="button" class="sm" data-escc>Charge from Escrow</button>' : ''}
+            ${ep.canCancel && !detail.archived ? '<button type="button" class="sm danger" data-escx>Cancel Plan</button>' : ''}
+            <button type="button" class="sm" data-subpage="ledger">← Back to Ledger</button>
+          </div>
+        </div>
+        <div class="pad">
+          <div class="balance-grid" style="margin-bottom:20px">
+            <div class="balance-box">
+              <div class="lbl"><span>Total Escrow Target</span></div>
+              <div class="val">${numFmt(p.totalCents)}</div>
+            </div>
+            <div class="balance-box">
+              <div class="lbl"><span>Paid to Driver</span></div>
+              <div class="val ok">+${numFmt(st.paid + st.refunded)}</div>
+            </div>
+            <div class="balance-box">
+              <div class="lbl"><span>Charged from Escrow</span></div>
+              <div class="val bad">−${numFmt(st.charged + st.applied)}</div>
+            </div>
+            <div class="balance-box ${st.held > 0 ? 'net-pos' : ''}">
+              <div class="lbl"><span>Currently Held</span></div>
+              <div class="val ok">${numFmt(st.held)}</div>
+            </div>
+          </div>
+          ${p.note ? `<p class="mut sub" style="margin:0 0 16px">${esc(p.note)}</p>` : ''}
+
+          <!-- Escrow Carousel -->
+          <div class="esc-carousel">
+            <div class="esc-nav">
+              <button type="button" class="sm" id="escPrev" ${escrowIdx <= 0 ? 'disabled' : ''}>← Previous Week</button>
+              <div style="text-align:center">
+                <b>Week ${curItem.n} of ${p.weeks}</b> · <span>${range(curItem.weekStart, curItem.weekEnd)}</span>
+                ${curItem.current ? ' <span class="pill warn" style="font-size:11px">Current week</span>' : ''}
+              </div>
+              <button type="button" class="sm" id="escNext" ${escrowIdx >= sched.length - 1 ? 'disabled' : ''}>Next Week →</button>
+            </div>
+            <div class="esc-strip">
+              ${sched.map((r, i) => {
+                const [cls, label] = STATE[r.state];
+                return `<button type="button" class="esc-chip ${i === escrowIdx ? 'sel' : ''}" data-jumpesc="${i}" title="Week ${r.n}: ${label}">
+                  <span>W${r.n}</span>
+                  <span class="pill ${cls}" style="font-size:10px;padding:1px 5px">${label}</span>
+                </button>`;
+              }).join('')}
+            </div>
+            <div class="esc-card">
+              <div>
+                <div style="font-size:12px;color:var(--mut)">Payment Amount</div>
+                <div style="font-size:22px;font-weight:600"><b>${numFmt(curItem.amountCents || curItem.scheduledCents)}</b></div>
+              </div>
+              <div>
+                <div style="font-size:12px;color:var(--mut)">Status</div>
+                <span class="pill ${STATE[curItem.state][0]}">${STATE[curItem.state][1]}</span>
+                ${curItem.statusNote ? `<div class="sub ${curItem.state === 'held' ? 'issue' : 'done'}">${esc(curItem.statusNote)}</div>` : ''}
+              </div>
+              <div class="row">
+                <button type="button" class="sm" data-w="${curItem.weekStart}">Open Week Ledger →</button>
+              </div>
+            </div>
+          </div>
+
+          <div style="margin-top:16px;text-align:right">
+            <button type="button" class="ghost sm" id="toggleEscTable">${showFullEscrowTable ? 'Hide full schedule table ↑' : 'Show full schedule table (' + p.weeks + ' weeks) ↓'}</button>
+          </div>
+        </div>
+        ${showFullEscrowTable ? `
+          <table>
+            <thead><tr><th>Week</th><th class="num">Amount</th><th>Status</th></tr></thead>
+            <tbody>${sched.map(r => {
+              const [cls, label] = STATE[r.state];
+              return `<tr class="link ${r.current ? 'editing' : ''}" data-w="${r.weekStart}">
+                <td><b>${range(r.weekStart, r.weekEnd)}</b><div class="sub mut">Week ${r.n} of ${p.weeks}${r.current ? ' · this week' : ''}</div></td>
+                <td class="num">${numFmt(r.amountCents || r.scheduledCents)}</td>
+                <td><span class="pill ${cls}">${label}</span>${r.statusNote ? `<div class="sub ${r.state === 'held' ? 'issue' : 'done'}">${esc(r.statusNote)}</div>` : ''}</td>
+              </tr>`;
+            }).join('')}</tbody>
+          </table>
+        ` : ''}
+      </div>
+    `;
+  };
+
+  const paintDetail = () => {
+    if (!detail) return;
+
+    // Capture unsubmitted form inputs so user never loses typed data
+    const draft = {
+      k: $('#k')?.value,
+      pty: $('#pty')?.value,
+      amt: $('#amt')?.value,
+      ref: $('#ref')?.value,
+      note: $('#note')?.value,
+      splitW: $('#splitW')?.value,
+      st: $('#st')?.value,
+      focusedId: document.activeElement?.id,
+      selectionStart: document.activeElement?.selectionStart,
+      selectionEnd: document.activeElement?.selectionEnd,
+    };
+
+    if (activeParty === 'owner' && !detail.owner) activeParty = 'driver';
+
+    const sourceEntries = ledgerMode === 'lifetime' ? detail.allEntries : detail.entries;
+    const filteredEntries = activeParty === 'driver'
+      ? sourceEntries.filter(e => (e.party || 'driver') === 'driver')
+      : activeParty === 'owner'
+      ? sourceEntries.filter(e => e.party === 'owner')
+      : sourceEntries;
+
+    const curReimb = activeParty === 'driver' ? detail.driverTotals.reimbursements : activeParty === 'owner' ? detail.ownerTotals.reimbursements : detail.reimbursements;
+    const curCharge = activeParty === 'driver' ? detail.driverTotals.chargebacks : activeParty === 'owner' ? detail.ownerTotals.chargebacks : detail.chargebacks;
+    const netCents = curReimb - curCharge;
+
+    const lifeReimb = activeParty === 'driver' ? detail.lifetime.driverReimbursements : activeParty === 'owner' ? detail.lifetime.ownerReimbursements : detail.lifetime.reimbursements;
+    const lifeCharge = activeParty === 'driver' ? detail.lifetime.driverChargebacks : activeParty === 'owner' ? detail.lifetime.ownerChargebacks : detail.lifetime.chargebacks;
+
+    const weekNotes = filteredEntries.map(e => e.note).filter(Boolean).join('; ');
+
+    const z = detail.zone;
+    const zoneBar = z && z.level !== 'green'
+      ? `<div class="card zone-${z.level}" style="margin-bottom:16px"><span class="pill zone-${z.level}">${z.level === 'red' ? 'Red zone' : 'Yellow zone'}</span><span>${esc(z.reasons.join(' · '))}</span><a class="back-link" style="margin:0 0 0 auto" href="#/watch">Watchlist →</a></div>`
+      : '';
+
+    // Header with Subpage tabs (Ledger & Payouts vs Escrow Plan)
+    const headerHtml = `
+      <div class="head" style="margin-bottom:16px;align-items:center">
+        <div>
+          <h2>Unit ${esc(detail.unit)} · ${esc(detail.driver || 'No Driver')}</h2>
+          <div style="font-size:13px;color:var(--mut);margin-top:4px">
+            ${detail.owner ? `Truck Owner: <b style="color:var(--pur)">${esc(detail.owner)}</b>` : 'Company-Owned Truck'}
+            ${detail.archived ? ' · <span class="pill">Terminated</span>' : ''}
+          </div>
+        </div>
+        <div class="subpage-nav">
+          <button type="button" class="subpage-btn ${subpage === 'ledger' ? 'active' : ''}" data-subpage="ledger">
+            📊 Ledger &amp; Payouts
+          </button>
+          <button type="button" class="subpage-btn ${subpage === 'escrow' ? 'active' : ''}" data-subpage="escrow">
+            🛡️ Escrow Plan ${ep && ep.plan && ep.plan.status === 'active' ? `<span class="pill ok" style="font-size:10px;padding:1px 6px">Active</span>` : ''}
+          </button>
+        </div>
+      </div>
+      ${zoneBar}
+    `;
+
+    if (subpage === 'escrow') {
+      $('#data').innerHTML = headerHtml + renderEscrowSubpage();
+      return;
+    }
+
+    // subpage === 'ledger'
+    $('#data').innerHTML = `
+      ${headerHtml}
+
+      <!-- Party Switcher Tabs (Driver vs Owner vs All Combined) -->
+      <div class="party-tabs">
+        <button type="button" class="party-tab ${activeParty === 'driver' ? 'active' : ''}" data-party="driver">
+          👤 Driver: <b>${esc(detail.driver || 'Driver')}</b>
+          <span class="party-badge driver">+${numFmt(detail.driverTotals.reimbursements)} / −${numFmt(detail.driverTotals.chargebacks)}</span>
+        </button>
+        ${detail.owner ? `
+        <button type="button" class="party-tab ${activeParty === 'owner' ? 'active' : ''}" data-party="owner">
+          🏢 Owner: <b>${esc(detail.owner)}</b>
+          <span class="party-badge owner">+${numFmt(detail.ownerTotals.reimbursements)} / −${numFmt(detail.ownerTotals.chargebacks)}</span>
+        </button>` : `
+        <button type="button" class="party-tab" data-addowner title="Set truck owner (if not company truck)">
+          + Add Outside Owner
+        </button>`}
+        <button type="button" class="party-tab ${activeParty === 'all' ? 'active' : ''}" data-party="all">
+          👥 All Combined (${sourceEntries.length})
+        </button>
+      </div>
+
+      <!-- 1. TOP: Overall Balance Card -->
+      <div class="card" style="margin-bottom:20px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+          <div>
+            <h3 style="margin:0">Overall Balance (${activeParty === 'driver' ? 'Driver: ' + esc(detail.driver) : activeParty === 'owner' ? 'Owner: ' + esc(detail.owner) : 'Combined'})</h3>
+            <span class="mut" style="font-size:12px">Transfer totals for week ${range(ws, plus6(ws))}</span>
+          </div>
+          <div class="row" style="gap:8px">
+            <button type="button" class="sm" data-copynotes="${esc(weekNotes)}" ${weekNotes ? '' : 'disabled'} title="Copy concatenated entry notes">📋 Copy Notes</button>
+          </div>
+        </div>
+        <div class="balance-grid">
+          <div class="balance-box">
+            <div class="lbl">
+              <span>Reimbursements</span>
+              <button type="button" class="ghost sm" data-copy="${(curReimb / 100).toFixed(2)}">Copy</button>
+            </div>
+            <div class="val ok">+${numFmt(curReimb)}</div>
+          </div>
+          <div class="balance-box">
+            <div class="lbl">
+              <span>Charges &amp; Deductions</span>
+              <button type="button" class="ghost sm" data-copy="${(curCharge / 100).toFixed(2)}">Copy</button>
+            </div>
+            <div class="val bad">−${numFmt(curCharge)}</div>
+          </div>
+          <div class="balance-box ${netCents >= 0 ? 'net-pos' : 'net-neg'}">
+            <div class="lbl">
+              <span>${netCents >= 0 ? 'Net Pay to ' + (activeParty === 'owner' ? 'Owner' : 'Driver') : (activeParty === 'owner' ? 'Owner' : 'Driver') + ' Owes Company'}</span>
+              <span class="party-badge ${activeParty === 'owner' ? 'owner' : 'driver'}">${activeParty === 'owner' ? 'Owner' : 'Driver'}</span>
+            </div>
+            <div class="val ${netCents >= 0 ? 'ok' : 'bad'}">
+              ${netCents >= 0 ? '+' : '−'}${numFmt(Math.abs(netCents))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. Add Ledger Entry Form -->
+      ${!detail.archived ? `
+      <div class="card" style="margin-bottom:20px;padding:18px 22px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <h3 style="margin:0">Add Ledger Entry</h3>
+            <span class="mut" style="font-size:12px">Record a charge or reimbursement</span>
+          </div>
+          <button type="button" class="sm" id="btnTg" style="background:var(--accbg);border-color:var(--acc);color:var(--acc);font-weight:600;padding:6px 14px">
+            📋 Paste Telegram Text
+          </button>
+        </div>
+        <div class="row" style="gap:12px;align-items:end">
+          <label style="width:135px">Type<select id="k">${opts(KIND_NEW)}</select></label>
+          <label style="width:110px">Target
+            <select id="pty">
+              <option value="driver"${activeParty !== 'owner' ? ' selected' : ''}>Driver</option>
+              <option value="owner"${activeParty === 'owner' ? ' selected' : ''}>Owner</option>
+            </select>
+          </label>
+          <label style="width:115px">Amount ($)<input id="amt" placeholder="573.73" inputmode="decimal"></label>
+          <label style="width:145px">Report Ref #<input id="ref" placeholder="e.g. 166475152"></label>
+          <label class="grow">Description<input id="note" placeholder="e.g. Southern Tire Mart oil change"></label>
+          <label style="width:125px">Divide into
+            <select id="splitW">
+              <option value="1">1 week</option>
+              <option value="2">2 weeks</option>
+              <option value="3">3 weeks</option>
+              <option value="4">4 weeks</option>
+              <option value="6">6 weeks</option>
+              <option value="8">8 weeks</option>
+              <option value="12">12 weeks</option>
+            </select>
+          </label>
+          <label style="width:125px">Status<select id="st">${opts(STAT, 'incomplete')}</select></label>
+          <button id="add" class="pri" style="height:36px;padding:0 18px">Save Entry</button>
+        </div>
+        <div id="amtp" class="mut" style="margin-top:8px;min-height:16px;font-size:12px"></div>
+      </div>` : ''}
+
+      <!-- 3. LEDGER ENTRIES TABLE (On Top) -->
+      <div class="card flush" style="margin-bottom:20px">
+        <div class="bar">
+          <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+            <h3 style="margin:0">Ledger Entries</h3>
+            <div class="view-toggle">
+              <button type="button" class="${ledgerMode === 'week' ? 'active' : ''}" data-vmode="week">This Week (${range(ws, plus6(ws))})</button>
+              <button type="button" class="${ledgerMode === 'lifetime' ? 'active' : ''}" data-vmode="lifetime">All-Time History (${filteredEntries.length})</button>
+            </div>
+          </div>
+          <span>${openPill(detail)}</span>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th style="width:95px;white-space:nowrap">Date</th>
+              <th>Description</th>
+              <th style="width:145px;white-space:nowrap">Report Ref #</th>
+              <th class="num" style="width:140px;white-space:nowrap">Amount</th>
+              <th style="width:85px;white-space:nowrap">Target</th>
+              <th style="width:120px;white-space:nowrap">Status</th>
+              <th style="width:150px"></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${filteredEntries.map(e => (editing === e.id ? editRow(e) : viewRow(e))).join('') || '<tr><td colspan="7" class="mut" style="padding:22px;text-align:center">No ledger entries recorded for this selection.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- 4. ALL TIME CHARGES AND REIMBURSEMENTS (Below Ledger) -->
+      <div class="card" style="margin-bottom:20px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+          <div>
+            <h3 style="margin:0">All-Time Financial Overview</h3>
+            <p class="mut" style="margin:2px 0 0;font-size:12px">Lifetime summary across all weeks for ${activeParty === 'driver' ? 'Driver: ' + esc(detail.driver) : activeParty === 'owner' ? 'Owner: ' + esc(detail.owner) : 'All Combined'}</p>
+          </div>
+          <button type="button" class="sm" data-vmode="${ledgerMode === 'lifetime' ? 'week' : 'lifetime'}">
+            ${ledgerMode === 'lifetime' ? 'Show This Week Only ↑' : 'View All-Time Ledger (' + detail.lifetime.entriesCount + ' entries) ↓'}
+          </button>
+        </div>
+        <div class="balance-grid">
+          <div class="balance-box">
+            <div class="lbl">
+              <span>All-Time Reimbursements</span>
+              <button type="button" class="copy-btn sm" data-copy="${(lifeReimb / 100).toFixed(2)}" title="Copy all-time reimbursements">📋 Copy</button>
+            </div>
+            <div class="val ok">+${numFmt(lifeReimb)}</div>
+          </div>
+          <div class="balance-box">
+            <div class="lbl">
+              <span>All-Time Charges</span>
+              <button type="button" class="copy-btn sm" data-copy="${(lifeCharge / 100).toFixed(2)}" title="Copy all-time charges">📋 Copy</button>
+            </div>
+            <div class="val bad">−${numFmt(lifeCharge)}</div>
+          </div>
+          <div class="balance-box ${lifeReimb >= lifeCharge ? 'net-pos' : 'net-neg'}">
+            <div class="lbl"><span>All-Time Net Balance</span></div>
+            <div class="val ${lifeReimb >= lifeCharge ? 'ok' : 'bad'}">
+              ${lifeReimb >= lifeCharge ? '+' : '−'}${numFmt(Math.abs(lifeReimb - lifeCharge))}
+            </div>
+          </div>
+          <div class="balance-box">
+            <div class="lbl"><span>Historical Entries</span></div>
+            <div class="val" style="color:var(--ink)">${detail.lifetime.entriesCount}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 5. ESCROW QUICK SUMMARY (All the way bottom) -->
+      <div class="escrow-summary-banner">
+        <div style="display:flex;align-items:center;gap:12px">
+          <span style="font-size:22px">🛡️</span>
+          <div>
+            ${ep && ep.plan && ep.plan.status === 'active' ? `
+              <div style="font-weight:600">Escrow Plan: ${numFmt(ep.plan.totalCents)} Total (${ep.plan.weeks} Weeks)</div>
+              <div class="mut" style="font-size:12.5px;margin-top:2px">
+                Paid to driver: <b>${numFmt(ep.stats.paid + ep.stats.refunded)}</b> · Charged from escrow: <b>${numFmt(ep.stats.charged + ep.stats.applied)}</b> · Still held: <b style="color:var(--ok)">${numFmt(ep.stats.held)}</b>
+              </div>
+            ` : `
+              <div style="font-weight:600">No Active Escrow Plan</div>
+              <div class="mut" style="font-size:12.5px;margin-top:2px">Set up a weekly escrow deduction schedule for this driver</div>
+            `}
+          </div>
+        </div>
+        <button type="button" class="sm pri" data-subpage="escrow" style="padding:7px 16px">
+          ${ep && ep.plan && ep.plan.status === 'active' ? 'Manage Escrow Plan →' : 'Set Up Escrow Plan →'}
+        </button>
+      </div>
+    `;
+
+    // Restore unsubmitted form draft so user typing is preserved
+    if (draft.k && $('#k')) $('#k').value = draft.k;
+    if (draft.pty && $('#pty')) $('#pty').value = draft.pty;
+    if (draft.amt && $('#amt')) {
+      $('#amt').value = draft.amt;
+      const c = toCents(draft.amt);
+      if (c && $('#amtp')) $('#amtp').textContent = `Parsed amount: ${numFmt(c)}`;
+    }
+    if (draft.ref && $('#ref')) $('#ref').value = draft.ref;
+    if (draft.note && $('#note')) $('#note').value = draft.note;
+    if (draft.splitW && $('#splitW')) $('#splitW').value = draft.splitW;
+    if (draft.st && $('#st')) $('#st').value = draft.st;
+    if (draft.focusedId && $('#' + draft.focusedId)) {
+      const el = $('#' + draft.focusedId);
+      el.focus();
+      if (typeof draft.selectionStart === 'number' && el.setSelectionRange) {
+        try { el.setSelectionRange(draft.selectionStart, draft.selectionEnd); } catch {}
+      }
+    }
+  };
+
+  const load = async (isPoll = false) => {
+    list = await api(`/weeks/${ws}`);
+    detail = selected ? await api(`/weeks/${ws}/units/${encodeURIComponent(selected)}`) : null;
+    ep = selected ? await api(`/units/${encodeURIComponent(selected)}/escrow`) : null;
+    paintList();
+    const isTyping = isPoll && document.activeElement && $('#data')?.contains(document.activeElement) && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
+    if (!editing && !isTyping) paintDetail();
+  };
+
+  $('#q').oninput = e => {
+    filter = e.target.value;
+    if (list) paintList();
+  };
+  $('#q').onkeydown = e => {
+    if (e.key === 'Enter') $('#ul li[data-u]')?.click();
+  };
+  $('#ul').onclick = e => {
+    const li = e.target.closest('li[data-u]');
+    if (li) location.hash = `#/w/${ws}/u/${encodeURIComponent(li.dataset.u)}`;
+  };
+
+  const patch = async (e, body) => {
+    try {
+      await api(`/entries/${e.id}`, 'PATCH', { expectedVersion: e.version, ...body });
+      editing = pendingStatus = null;
+      toast('Entry updated');
+      await load();
+    } catch (err) {
+      toast(err.message, 'bad');
+      if (/modified/.test(err.message)) {
+        editing = null;
+        await load();
+      }
+    }
+  };
+
+  $('#data').oninput = ev => {
+    if (ev.target.id === 'amt') {
+      const c = toCents(ev.target.value);
+      const el = $('#amtp');
+      if (el) el.textContent = !ev.target.value ? '' : c ? `Parsed amount: ${numFmt(c)}` : 'Invalid number format';
+    }
+    if (ev.target.id === 'esT' || ev.target.id === 'esW') {
+      const t = toCents($('#esT')?.value || ''), w = parseInt($('#esW')?.value || '', 10);
+      const el = $('#esP');
+      if (el) {
+        if (!$('#esT')?.value) el.textContent = '';
+        else if (!t || !(w >= 1)) el.textContent = 'Enter a valid total and number of weeks';
+        else {
+          const base = Math.floor(t / w), last = t - base * (w - 1);
+          el.textContent = `${w} weekly payment${w > 1 ? 's' : ''} of ${numFmt(base)}${last !== base ? `, the last one ${numFmt(last)}` : ''}`;
+        }
+      }
+    }
+  };
+
+  $('#data').onclick = async ev => {
+    // 1-Click Copy button or ref pill
+    const c = ev.target.closest('[data-copy]');
+    if (c) {
+      await copyText(c.dataset.copy, c);
+      return;
+    }
+    const cn = ev.target.closest('[data-copynet]');
+    if (cn) {
+      await copyText(cn.dataset.copynet, cn);
+      return;
+    }
+    const cnotes = ev.target.closest('[data-copynotes]');
+    if (cnotes) {
+      await copyText(cnotes.dataset.copynotes, cnotes);
+      return;
+    }
+
+    // Subpage Navigation (Ledger vs Escrow)
+    const sp = ev.target.closest('[data-subpage]');
+    if (sp) {
+      subpage = sp.dataset.subpage;
+      paintDetail();
+      return;
+    }
+
+    // Party Tab switching (Driver vs Owner vs All)
+    const pTab = ev.target.closest('[data-party]');
+    if (pTab) {
+      activeParty = pTab.dataset.party;
+      paintDetail();
+      return;
+    }
+
+    // Add Owner button
+    if (ev.target.closest('[data-addowner]')) {
+      const ownerName = await ask({
+        title: `Set Owner for Unit ${detail.unit}`,
+        body: 'Enter the company or individual who owns this truck (driver is company driver).',
+        label: 'Truck Owner Name / Company',
+        confirm: 'Set Owner',
+      });
+      if (ownerName) {
+        try {
+          await api(`/units/${encodeURIComponent(detail.unit)}`, 'PATCH', { owner: ownerName });
+          toast('Owner saved');
+          activeParty = 'owner';
+          await load();
+        } catch (err) {
+          toast(err.message, 'bad');
+        }
+      }
+      return;
+    }
+
+    // Ledger View Mode (This Week vs All Time)
+    const vMode = ev.target.closest('[data-vmode]');
+    if (vMode) {
+      ledgerMode = vMode.dataset.vmode;
+      paintDetail();
+      return;
+    }
+
+    // Paste Telegram Text modal
+    if (ev.target.closest('#btnTg')) {
+      const parsed = await telegramDialog(selected);
+      if (parsed) {
+        if (parsed.amount && $('#amt')) $('#amt').value = parsed.amount;
+        if (parsed.refCode && $('#ref')) $('#ref').value = parsed.refCode;
+        if (parsed.combinedNote && $('#note')) $('#note').value = parsed.combinedNote;
+        if ($('#k')) $('#k').value = 'chargeback';
+        const c = toCents($('#amt')?.value || '');
+        if (c && $('#amtp')) $('#amtp').textContent = `Parsed amount: ${numFmt(c)}`;
+        toast('Telegram details filled in!');
+        if (parsed.unit && parsed.unit !== selected) {
+          if (await ask({ title: `Switch to Unit ${parsed.unit}?`, body: `The telegram message is for Unit ${parsed.unit}, but you are currently on Unit ${selected}. Switch to Unit ${parsed.unit}?`, confirm: 'Switch Unit' })) {
+            location.hash = `#/w/${ws}/u/${encodeURIComponent(parsed.unit)}`;
+          }
+        }
+      }
+      return;
+    }
+
+    // Save New Entry
+    if (ev.target.closest('#add')) {
+      const addBtn = ev.target.closest('#add');
+      addBtn.disabled = true;
+      try {
+        const splitWeeks = parseInt($('#splitW')?.value || '1', 10);
+        const totalCents = toCents($('#amt').value);
+        if (!totalCents) throw new Error('Enter a valid amount');
+
+        if (splitWeeks > 1) {
+          const base = Math.floor(totalCents / splitWeeks);
+          const remainder = totalCents - base * splitWeeks;
+          const entries = [];
+          for (let i = 0; i < splitWeeks; i++) {
+            const amt = i === splitWeeks - 1 ? base + remainder : base;
+            entries.push({
+              unit: selected,
+              kind: $('#k').value,
+              amountCents: amt,
+              note: `Part ${i + 1}/${splitWeeks}: ${$('#note').value || 'Charge'}`,
+              sourceRef: $('#ref').value.trim(),
+              status: $('#st').value,
+              statusNote: `Installment ${i + 1} of ${splitWeeks}`,
+              party: $('#pty').value,
+              weekStart: addWeeks(ws, i),
+            });
+          }
+          await api('/entries', 'POST', { entries });
+          toast(`Created ${splitWeeks} split installments across consecutive weeks`);
+        } else {
+          await api('/entries', 'POST', {
+            entries: [
+              {
+                unit: selected,
+                kind: $('#k').value,
+                amount: $('#amt').value,
+                note: $('#note').value,
+                sourceRef: $('#ref').value.trim(),
+                status: $('#st').value,
+                party: $('#pty').value,
+                weekStart: ws,
+              },
+            ],
+          });
+          toast('Entry saved');
+        }
+
+        for (const id of ['amt', 'note', 'ref']) if ($('#' + id)) $('#' + id).value = '';
+        if ($('#amtp')) $('#amtp').textContent = '';
+        if ($('#st')) $('#st').value = 'incomplete';
+        if ($('#splitW')) $('#splitW').value = '1';
+        await load();
+        $('#amt')?.focus();
+      } catch (e) {
+        toast(e.message, 'bad');
+      }
+      addBtn.disabled = false;
+      return;
+    }
+
+    // Escrow Setup Button
+    if (ev.target.closest('#esGo')) {
+      const esBtn = ev.target.closest('#esGo');
+      esBtn.disabled = true;
+      try {
+        await api(`/units/${encodeURIComponent(selected)}/escrow`, 'POST', {
+          amount: $('#esT').value, weeks: $('#esW').value, start: $('#esS').value, note: $('#esN').value,
+        });
+        toast('Escrow started');
+        await load();
+      } catch (e) {
+        toast(e.message, 'bad');
+        esBtn.disabled = false;
+      }
+      return;
+    }
+
+    // Escrow Carousel navigation
+    if (ev.target.closest('#escPrev')) {
+      if (escrowIdx > 0) {
+        escrowIdx--;
+        paintDetail();
+      }
+      return;
+    }
+    if (ev.target.closest('#escNext')) {
+      if (ep?.schedule && escrowIdx < ep.schedule.length - 1) {
+        escrowIdx++;
+        paintDetail();
+      }
+      return;
+    }
+    const jumpEsc = ev.target.closest('[data-jumpesc]');
+    if (jumpEsc) {
+      escrowIdx = parseInt(jumpEsc.dataset.jumpesc, 10);
+      paintDetail();
+      return;
+    }
+    if (ev.target.closest('#toggleEscTable')) {
+      showFullEscrowTable = !showFullEscrowTable;
+      paintDetail();
+      return;
+    }
+
+    // Divide Charge action
+    const splitBtn = ev.target.closest('[data-split]');
+    if (splitBtn) {
+      const entryId = splitBtn.dataset.split;
+      const allPossible = (detail.entries || []).concat(detail.allEntries || []);
+      const entry = allPossible.find(x => x.id === entryId);
+      if (entry) {
+        const plan = await divideDialog(entry, ws);
+        if (plan) {
+          try {
+            await api(`/entries/${entry.id}/split`, 'POST', plan);
+            toast(`Charge divided into ${plan.weeks} weekly installments`);
+            await load();
+          } catch (err) {
+            toast(err.message, 'bad');
+          }
+        }
+      }
+      return;
+    }
+
+    // Escrow panel actions
+    if (ev.target.closest('[data-escc]')) {
+      const f = await askForm({
+        title: 'Charge from escrow',
+        body: `Escrow still holds ${numFmt(ep.stats.held)}. This amount is taken out of escrow instead of the driver's salary.`,
+        fields: [
+          { name: 'amount', label: 'Amount', placeholder: '150.00', inputmode: 'decimal' },
+          { name: 'note', label: 'Note (why is the driver charged?)', placeholder: 'e.g. Damaged trailer door' },
+        ],
+        confirm: 'Charge from escrow',
+        danger: true,
+      });
+      if (f) {
+        try {
+          await api(`/units/${encodeURIComponent(selected)}/escrow/charge`, 'POST', f);
+          toast('Charged from escrow');
+          await load();
+        } catch (err) {
+          toast(err.message, 'bad');
+        }
+      }
+      return;
+    }
+    if (ev.target.closest('[data-escx]')) {
+      if (await ask({ title: 'Cancel escrow plan?', body: 'Nothing was paid or charged yet, so the plan and its weekly rows are removed. You can set up a new plan afterwards.', confirm: 'Cancel plan', danger: true })) {
+        try {
+          await api(`/units/${encodeURIComponent(selected)}/escrow/cancel`, 'POST');
+          toast('Escrow plan cancelled');
+          route();
+        } catch (err) {
+          toast(err.message, 'bad');
+        }
+      }
+      return;
+    }
+    const wk = ev.target.closest('[data-w]');
+    if (wk && !ev.target.closest('[data-split]')) {
+      location.hash = `#/w/${wk.dataset.w}/u/${encodeURIComponent(selected)}`;
+      return;
+    }
+
+    const tr = ev.target.closest('tr[data-id]');
+    if (!tr) return;
+    const allPossible = (detail.entries || []).concat(detail.allEntries || []);
+    const e = allPossible.find(x => x.id === tr.dataset.id);
+
+    if (ev.target.closest('[data-edit]')) {
+      editing = e.id;
+      pendingStatus = null;
+      paintDetail();
+      $('#data [data-f=note]')?.focus();
+    }
+    if (ev.target.closest('[data-cancel]')) {
+      editing = pendingStatus = null;
+      paintDetail();
+    }
+    if (ev.target.closest('[data-save]')) {
+      const f = k => tr.querySelector(`[data-f=${k}]`)?.value;
+      await patch(e, {
+        kind: f('kind'),
+        amount: f('amount'),
+        note: f('note'),
+        sourceRef: f('sourceRef'),
+        party: f('party'),
+        status: f('status'),
+        statusNote: f('statusNote'),
+      });
+    }
+    if (ev.target.closest('[data-void]')) {
+      const reason = await ask({
+        title: 'Void this entry?',
+        body: 'The entry stays in the Google Sheet audit log but is excluded from all weekly totals.',
+        label: 'Void reason',
+        confirm: 'Void entry',
+        danger: true,
+      });
+      if (reason) {
+        try {
+          await api(`/entries/${e.id}/void`, 'POST', { expectedVersion: e.version, reason });
+          toast('Entry voided');
+          await load();
+        } catch (err) {
+          toast(err.message, 'bad');
+        }
+      }
+    }
+  };
+
+  $('#data').onchange = async ev => {
+    const s = ev.target.closest('select[data-st]');
+    if (!s) return;
+    const allPossible = (detail.entries || []).concat(detail.allEntries || []);
+    const e = allPossible.find(x => x.id === s.closest('tr').dataset.id);
+    if (!e) return;
+    if (s.value === 'issue') {
+      editing = e.id;
+      pendingStatus = 'issue';
+      paintDetail();
+      $('#data [data-f=statusNote]')?.focus();
+      toast(e.kind === 'escrow' ? 'Add a note explaining why this payment is held back' : 'Add an operational note explaining the issue');
+    } else {
+      await patch(e, { status: s.value });
+    }
+  };
+
+  await load();
+  poll(() => load(true));
+}
+
+// ───────── Units & Drivers Management ─────────
+async function unitsView() {
+  let editingUnit = null;
+  const paint = async () => {
+    const us = await api('/units');
+    $('#app').innerHTML = `
+      <div class="head">
+        <div>
+          <h1>Units &amp; Drivers</h1>
+          <p class="mut">Manage active fleet units. Assign drivers, outside truck owners, and driver escrow deductions. Terminating a unit archives it while keeping all historical records intact.</p>
+        </div>
+      </div>
+      <div class="card" style="padding:22px">
+        <h3 style="margin:0 0 16px">Add New Unit &amp; Driver</h3>
+        <div class="row" style="gap:14px;margin-bottom:18px">
+          <label style="width:140px">Unit Number<input id="nu" size="8" placeholder="304" inputmode="numeric" required autofocus></label>
+          <label class="grow">Driver Name<input id="nd" placeholder="e.g. Byron" required></label>
+          <label class="grow">Truck Owner (Optional)<input id="no" placeholder="Leave blank if company-owned truck"></label>
+        </div>
+        
+        <!-- Driver Escrow Setup (Asked automatically when adding driver) -->
+        <div style="background:var(--s2);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin-bottom:18px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+            <div style="font-weight:600;display:flex;align-items:center;gap:8px">
+              <span>🛡️ Driver Escrow Plan Setup</span>
+              <span class="mut" style="font-size:12px;font-weight:normal">(Optional — skip or leave blank if not applicable)</span>
+            </div>
+          </div>
+          <div class="row" style="gap:12px;align-items:end">
+            <label style="width:150px">Escrow Target ($)<input id="nesT" placeholder="1200.00" inputmode="decimal"></label>
+            <label style="width:100px">Weeks<input id="nesW" value="12" inputmode="numeric"></label>
+            <label style="width:140px">Deductions Start<select id="nesS"><option value="current">This week</option><option value="next">Next week</option></select></label>
+            <label class="grow">Escrow Note<input id="nesN" placeholder="Optional (e.g. Security deposit)"></label>
+          </div>
+          <div id="nesP" class="mut" style="margin-top:8px;font-size:12.5px;min-height:16px"></div>
+        </div>
+
+        <div class="row end">
+          <button id="addu" class="pri" style="padding:8px 20px">Add Unit &amp; Driver</button>
+        </div>
+      </div>
+
+      <div class="card flush">
+        <table>
+          <thead>
+            <tr>
+              <th>Unit</th>
+              <th>Driver</th>
+              <th>Truck Owner</th>
+              <th>Escrow Status</th>
+              <th class="num">Active Entries</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${us
+              .map(u =>
+                editingUnit === u.unit
+                  ? `<tr class="editing" data-u="${esc(u.unit)}">
+                      <td><input data-f="unit" value="${esc(u.unit)}" size="8" ${u.locked ? 'disabled title="Units with history keep their number"' : ''}></td>
+                      <td><input data-f="driver" value="${esc(u.driver)}"></td>
+                      <td><input data-f="owner" value="${esc(u.owner || '')}" placeholder="Owner (optional)"></td>
+                      <td><span class="mut">—</span></td>
+                      <td class="num">${u.entries}</td>
+                      <td class="act">
+                        <button class="pri sm" data-save>Save</button>
+                        <button class="sm" data-cancel>Cancel</button>
+                      </td>
+                    </tr>`
+                  : `<tr data-u="${esc(u.unit)}">
+                      <td><b>Unit ${esc(u.unit)}</b>${zonePill(u.zone)}</td>
+                      <td><b>${esc(u.driver)}</b></td>
+                      <td>${u.owner ? `<b style="color:var(--pur)">${esc(u.owner)}</b>` : '<span class="mut">Company Truck</span>'}</td>
+                      <td>${u.escrow?.active ? `<span class="pill ok">Active (${numFmt(u.escrow.heldCents)} held)</span>` : '<span class="mut">No Plan</span>'}</td>
+                      <td class="num">${u.entries}</td>
+                      <td class="act">
+                        <button class="sm" data-edit>Rename / Edit</button>
+                        <button class="sm" data-term>Terminate</button>
+                        <button class="sm danger" data-del ${u.locked ? 'disabled title="Has financial history. Use Terminate instead."' : ''}>Delete</button>
+                      </td>
+                    </tr>`
+              )
+              .join('') || '<tr><td colspan="6" class="mut" style="padding:22px;text-align:center">No active units yet. Add your first truck above.</td></tr>'}
+          </tbody>
+        </table>
+      </div>`;
+
+    const updateAddEscrowPreview = () => {
+      const t = toCents($('#nesT')?.value || '');
+      const w = parseInt($('#nesW')?.value || '', 10);
+      const el = $('#nesP');
+      if (!el) return;
+      if (!$('#nesT')?.value) el.textContent = '';
+      else if (!t || !(w >= 1)) el.textContent = 'Enter a valid target amount and number of weeks';
+      else {
+        const base = Math.floor(t / w), last = t - base * (w - 1);
+        el.textContent = `Escrow plan will schedule ${w} weekly deductions of ${numFmt(base)}${last !== base ? `, last week ${numFmt(last)}` : ''}`;
+      }
+    };
+    $('#nesT').oninput = updateAddEscrowPreview;
+    $('#nesW').oninput = updateAddEscrowPreview;
+
+    $('#addu').onclick = () => {
+      const payload = {
+        unit: $('#nu').value,
+        driver: $('#nd').value,
+        owner: $('#no').value,
+      };
+      if ($('#nesT')?.value) {
+        payload.escrow = {
+          amount: $('#nesT').value,
+          weeks: $('#nesW').value,
+          start: $('#nesS').value,
+          note: $('#nesN').value,
+        };
+      }
+      act(() => api('/units', 'POST', payload), 'Unit and driver added');
+    };
+  };
+
+  const act = async (fn, msg) => {
+    try {
+      await fn();
+      editingUnit = null;
+      toast(msg);
+      await paint();
+    } catch (e) {
+      toast(e.message, 'bad');
+    }
+  };
+
+  $('#app').onclick = async ev => {
+    const tr = ev.target.closest('tr[data-u]');
+    if (!tr) return;
+    const u = tr.dataset.u;
+    const f = k => tr.querySelector(`[data-f=${k}]`);
+
+    if (ev.target.closest('[data-edit]')) {
+      editingUnit = u;
+      await paint();
+    }
+    if (ev.target.closest('[data-cancel]')) {
+      editingUnit = null;
+      await paint();
+    }
+    if (ev.target.closest('[data-save]')) {
+      act(() => api(`/units/${u}`, 'PATCH', { unit: f('unit').value, driver: f('driver').value, owner: f('owner').value }), 'Unit updated');
+    }
+    if (ev.target.closest('[data-term]')) {
+      const r = await terminateDialog(u).catch(e => (toast(e.message, 'bad'), null));
+      if (r) {
+        editingUnit = null;
+        toast(`Unit ${u} terminated. ${r.refundCents ? 'Escrow refund ' + numFmt(r.refundCents) + '. ' : ''}${r.owedCents ? 'Still owed by driver: ' + numFmt(r.owedCents) + '.' : ''}`.trim());
+        await paint();
+      }
+    }
+    if (
+      ev.target.closest('[data-del]') &&
+      (await ask({
+        title: `Delete Unit ${u}?`,
+        body: 'This unit has no financial history and will be permanently removed.',
+        confirm: 'Delete Unit',
+        danger: true,
+      }))
+    ) {
+      act(() => api(`/units/${u}`, 'DELETE'), 'Unit deleted');
+    }
+  };
+
+  await paint();
+}
+
+// ───────── Termination window ─────────
+async function terminateDialog(u) {
+  const p = await api(`/units/${encodeURIComponent(u)}/termination-preview`);
+  return new Promise(resolve => {
+    const d = $('#dlg');
+    d.className = 'wide';
+    let dm = [];
+    const kv = (l, v, cls = '') => `<div class="kv ${cls}"><span>${l}</span><b>${numFmt(v)}</b></div>`;
+    d.innerHTML = `<form id="tf" novalidate>
+      <h3 style="margin:0">Terminate Unit ${esc(u)} · ${esc(p.driver)}</h3>
+      <p class="mut">Money is settled first, then the unit moves to the Archive. Everything below lands in <b>${range(p.settlementWeek, plus6(p.settlementWeek))}</b> (next week).</p>
+      <label>Termination reason<input id="tr" placeholder="e.g. Driver resigned" autocomplete="off"></label>
+      <div class="tbox">
+        <h4>Escrow</h4>
+        ${p.plan ? kv('Total escrow', p.plan.totalCents) + kv('Already paid to driver', p.plan.paid) + kv('Already charged from escrow', p.plan.charged) + kv('Held now', p.heldCents, 'big') : '<span class="mut">No escrow plan for this unit.</span>'}
+      </div>
+      <div class="tbox">
+        <h4>Unpaid chargebacks${p.plan ? ' · taken from escrow automatically' : ''}</h4>
+        ${p.unpaid.map(x => `<div class="kv"><span>${range(x.weekStart, plus6(x.weekStart))} · ${esc(x.note) || 'No description'}</span><b>${numFmt(x.amountCents)}</b></div>`).join('') || '<span class="mut">None. All chargebacks are marked Done.</span>'}
+        ${p.unpaid.length ? kv('Total', p.unpaidTotalCents, 'big') : ''}
+      </div>
+      <div class="tbox">
+        <h4>Charges for damages (optional, skip if none)</h4>
+        <div id="dl" style="display:grid;gap:10px"></div>
+        <div><button type="button" class="sm" id="adl">+ Add charge</button></div>
+      </div>
+      <div class="tbox" id="sum"></div>
+      <div class="row end">
+        <button type="button" id="tc">Cancel</button>
+        <button type="button" id="tok" class="danger">Terminate &amp; settle</button>
+      </div>
+    </form>`;
+
+    const sum = () => {
+      const dmg = dm.reduce((a, l) => a + (toCents(l.amt) || 0), 0);
+      const total = p.unpaidTotalCents + dmg;
+      const applied = Math.min(p.heldCents, total);
+      const refund = Math.max(p.heldCents - total, 0);
+      const owed = Math.max(total - p.heldCents, 0);
+      $('#sum').innerHTML = `<h4>Settlement</h4>
+        ${kv('Unpaid chargebacks + damage charges', total)}
+        ${kv('Taken from escrow', applied)}
+        ${kv('Escrow refund to driver', refund)}
+        ${kv('Still owed by driver', owed, 'big')}`;
+    };
+    const lines = () => {
+      $('#dl').innerHTML = dm.map((l, i) => `<div class="row" data-i="${i}">
+          <label style="width:130px">Amount<input data-a value="${esc(l.amt)}" placeholder="250.00" inputmode="decimal" autocomplete="off"></label>
+          <label class="grow">Note<input data-n value="${esc(l.note)}" placeholder="What was damaged / why charged?" autocomplete="off"></label>
+          <button type="button" class="sm" data-rm title="Remove">✕</button>
+        </div>`).join('');
+      sum();
+    };
+    $('#tf').onsubmit = e => e.preventDefault();
+    $('#adl').onclick = () => { dm.push({ amt: '', note: '' }); lines(); $('#dl [data-a]:last-of-type, #dl .row:last-child [data-a]')?.focus(); };
+    $('#dl').oninput = e => {
+      const row = e.target.closest('[data-i]');
+      if (!row) return;
+      const l = dm[+row.dataset.i];
+      if (e.target.matches('[data-a]')) l.amt = e.target.value;
+      if (e.target.matches('[data-n]')) l.note = e.target.value;
+      sum();
+    };
+    $('#dl').onclick = e => {
+      const row = e.target.closest('[data-i]');
+      if (row && e.target.closest('[data-rm]')) { dm.splice(+row.dataset.i, 1); lines(); }
+    };
+    $('#tc').onclick = () => d.close();
+    $('#tok').onclick = async ev => {
+      const reason = $('#tr').value.trim();
+      if (!reason) return toast('Add a termination reason', 'bad');
+      const damages = [];
+      for (const [i, l] of dm.entries()) {
+        if (!l.amt.trim() && !l.note.trim()) continue;
+        if (!toCents(l.amt)) return toast(`Charge ${i + 1}: enter a valid amount`, 'bad');
+        if (!l.note.trim()) return toast(`Charge ${i + 1}: add a note explaining why`, 'bad');
+        damages.push({ amount: l.amt, note: l.note.trim() });
+      }
+      ev.target.disabled = true;
+      try {
+        const r = await api(`/units/${encodeURIComponent(u)}/archive`, 'POST', { reason, damages });
+        d.close();
+        resolve(r);
+      } catch (e) {
+        toast(e.message, 'bad');
+        ev.target.disabled = false;
+      }
+    };
+    d.returnValue = '';
+    d.onclose = () => { d.className = ''; resolve(null); };
+    lines();
+    d.showModal();
+    $('#tr').focus();
+  });
+}
+
+// ───────── Watchlist ─────────
+async function watchView() {
+  const paint = async () => {
+    const w = await api('/watchlist');
+    const c = w.thresholds;
+    $('#app').innerHTML = `
+      <div class="head">
+        <div>
+          <h1>Watchlist</h1>
+          <p class="mut">Units &amp; drivers with heavy or repeated charges. Shows all-time charges and current risk indicators.</p>
+        </div>
+      </div>
+      <div class="card flush">
+        <table>
+          <thead>
+            <tr>
+              <th>Zone</th>
+              <th>Unit</th>
+              <th>Driver / Owner</th>
+              <th class="num">Unpaid chargebacks</th>
+              <th class="num">All-Time Charges</th>
+              <th class="num">Charges, last 4 wks</th>
+              <th class="num">Escrow held</th>
+              <th>Why</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${w.items.map(x => `
+              <tr class="link" tabindex="0" onclick="location.hash='#/w/${w.week}/u/${encodeURIComponent(x.unit)}'" onkeydown="if(event.key==='Enter')this.click()">
+                <td><span class="pill zone-${x.level}">${x.level === 'red' ? 'Red' : 'Yellow'}</span></td>
+                <td><b>Unit ${esc(x.unit)}</b></td>
+                <td>
+                  <div>${esc(x.driver)}</div>
+                  ${x.owner ? `<div class="sub mut">Owner: <b>${esc(x.owner)}</b></div>` : ''}
+                </td>
+                <td class="num">${numFmt(x.unpaidCents)}</td>
+                <td class="num bad"><b>${numFmt(x.allTimeChargesCents || 0)}</b></td>
+                <td class="num">${numFmt(x.last4Cents)}</td>
+                <td class="num">${numFmt(x.heldCents)}</td>
+                <td class="mut">${esc(x.reasons.join(' · '))}</td>
+              </tr>`).join('') || '<tr><td colspan="8" class="mut">Nobody needs attention right now.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+      <div class="card mut" style="font-size:13px">
+        <b>How zones work.</b>
+        Yellow: unpaid chargebacks of ${numFmt(c.yellowUnpaid)} or more, or ${numFmt(c.yellow4wk)} or more charged in the last 4 weeks, or charged in ${c.yellowWeeks}+ of the last 6 weeks, or ${c.yellowIssues}+ open issues.
+        Red: unpaid chargebacks of ${numFmt(c.redUnpaid)} or more, or ${numFmt(c.red4wk)} or more in the last 4 weeks, or charged in ${c.redWeeks}+ of the last 6 weeks, or unpaid chargebacks of ${numFmt(c.redUncovered)}+ that escrow cannot cover.
+        Change the limits in <code>.env</code> (ZONE_* values).
+      </div>`;
+  };
+  await paint();
+  poll(paint);
+}
+
+// ───────── Archive View ─────────
+async function archiveView(unit) {
+  if (unit) {
+    const a = await api(`/archive/${encodeURIComponent(unit)}`);
+    $('#app').innerHTML = `
+      <div class="head">
+        <div>
+          <a class="back-link" href="#/archive">← Back to Archive</a>
+          <h1>Unit ${esc(a.unit)} · ${esc(a.driver)}</h1>
+          <p class="mut">Terminated ${a.terminatedAt.slice(0, 10)} by ${esc(a.terminatedBy)} — Reason: ${esc(a.reason)}</p>
+        </div>
+      </div>
+      <div class="stats" style="margin-bottom:22px">
+        <div class="stat"><span>Lifetime Reimbursements</span><b>${numFmt(a.reimbursements)}</b></div>
+        <div class="stat"><span>Lifetime Chargebacks</span><b>${numFmt(a.chargebacks)}</b></div>
+        <div class="stat"><span>Escrow Paid to Driver</span><b>${numFmt(a.escrowPaid)}</b></div>
+        <div class="stat"><span>Charged From Escrow</span><b>${numFmt(a.escrowCharged)}</b></div>
+        <div class="stat"><span>Leaving Charges</span><b>${numFmt(a.leaving)}</b></div>
+      </div>
+      <div class="card flush">
+        <table>
+          <thead>
+            <tr>
+              <th>Week</th>
+              <th>Description &amp; Operational Note</th>
+              <th>Type</th>
+              <th class="num">Amount</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${a.entries
+              .map(
+                e => `
+                <tr>
+                  <td class="mut">${range(e.weekStart, plus6(e.weekStart))}</td>
+                  <td>
+                    <div>${esc(e.note) || '<span class="mut">No description</span>'}</div>
+                    ${e.statusNote ? `<div class="sub ${e.status}">${esc(e.statusNote)}</div>` : ''}
+                  </td>
+                  <td><span class="pill ${e.kind}">${KIND[e.kind]}</span></td>
+                  <td class="num"><b>${numFmt(e.amountCents)}</b></td>
+                  <td><span class="pill ${e.status === 'done' ? 'ok' : e.status === 'issue' ? 'bad' : 'warn'}">${STAT[e.status]}</span></td>
+                </tr>`
+              )
+              .join('') || '<tr><td colspan="5" class="mut">No entries on record.</td></tr>'}
+          </tbody>
+        </table>
+      </div>`;
+    return;
+  }
+
+  const as = await api('/archive');
+  $('#app').innerHTML = `
+    <div class="head">
+      <div>
+        <h1>Archived Units</h1>
+        <p class="mut">Terminated drivers and units preserved with full historical audit logs</p>
+      </div>
+    </div>
+    <div class="card flush">
+      <table>
+        <thead>
+          <tr>
+            <th>Unit</th>
+            <th>Driver</th>
+            <th>Terminated Date</th>
+            <th>Reason</th>
+            <th class="num">Reimbursements</th>
+            <th class="num">Chargebacks</th>
+            <th>Open Items</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${as
+            .map(
+              a => `
+              <tr class="link" tabindex="0" onclick="location.hash='#/archive/${encodeURIComponent(a.unit)}'" onkeydown="if(event.key==='Enter')this.click()">
+                <td><b>Unit ${esc(a.unit)}</b></td>
+                <td>${esc(a.driver)}</td>
+                <td class="mut">${a.terminatedAt.slice(0, 10)}</td>
+                <td>${esc(a.reason)}</td>
+                <td class="num">${numFmt(a.reimbursements)}</td>
+                <td class="num">${numFmt(a.chargebacks)}</td>
+                <td>${openPill(a)}</td>
+              </tr>`
+            )
+            .join('') || '<tr><td colspan="7" class="mut">No archived units yet.</td></tr>'}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+// Keyboard Shortcuts
+addEventListener('keydown', e => {
+  if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) {
+    if (e.key === 'Escape') document.activeElement.blur();
+    return;
+  }
+  if (e.key === '/') {
+    e.preventDefault();
+    $('#q')?.focus();
+  }
+  if (e.key === 'j' || e.key === 'k') {
+    const li = $('#ul li.sel');
+    (li ? (e.key === 'j' ? li.nextElementSibling : li.previousElementSibling) : $('#ul li[data-u]'))?.click();
+  }
+});
+
+api('/me').then(m => enter(m.user)).catch(() => { $('#login').hidden = false; });
+</script>
+</body>
+</html>

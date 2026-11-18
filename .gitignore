@@ -1,0 +1,5 @@
+node_modules
+.env
+.tg-sync-state.json
+.tg-session-pending.json
+*.log
