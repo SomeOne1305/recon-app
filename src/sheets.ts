@@ -1,5 +1,8 @@
 // Storage layer: Google Sheets.
 // Entries are append-only versioned rows; the Node.js server is the sole writer.
+try {
+  process.loadEnvFile?.('.env');
+} catch {}
 
 import { google } from 'googleapis';
 import { UserError, natCompare, type Kind, type Status, type Source } from './domain.js';

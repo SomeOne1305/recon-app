@@ -684,6 +684,7 @@ dialog.wide { width: min(680px, 94vw); max-height: 92vh; overflow: auto; }
       <a href="#/watch" data-t="watch">Watchlist<span id="wb"></span></a>
     </nav>
     <div style="margin-left:auto;display:flex;align-items:center;gap:10px">
+      <span id="tgBadge" style="font-size:12px;padding:3px 8px;border-radius:12px;background:var(--s2);cursor:pointer;display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line)" title="Telegram Connection Status">● TG</span>
       <button class="sm" id="btnSyncTg" title="Scan Telegram groups for missed messages and backfill them" style="display:inline-flex;align-items:center;gap:5px;background:var(--s2);border-color:var(--line)">
         🔄 Sync Telegram
       </button>
@@ -960,23 +961,63 @@ $('#out').onclick = async () => {
   showLogin();
 };
 
+async function updateTgBadge() {
+  try {
+    const st = await api('/telegram/status');
+    const b = $('#tgBadge');
+    if (!b) return;
+    if (st.connected) {
+      b.innerHTML = `<span style="color:#22c55e">●</span> TG Online (${st.monitoredCount})`;
+      b.title = `Connected! Monitored channels: ${st.monitoredChannels.join(', ') || 'None'}\nLast sheet entry: ${st.lastEntryDate || 'None'}\nClick to view details`;
+    } else {
+      b.innerHTML = `<span style="color:#ef4444">●</span> TG Offline`;
+      b.title = (st.lastError || 'Disconnected') + '\nClick to view details';
+    }
+  } catch {}
+}
+
+$('#tgBadge').onclick = async () => {
+  try {
+    const st = await api('/telegram/status');
+    const lastDate = st.lastEntryDate || 'None';
+    const channels = st.monitoredChannels?.length ? st.monitoredChannels.join(', ') : 'None detected';
+    const errHtml = st.lastError ? `<div class="bad" style="margin-top:10px;font-size:12px;background:rgba(239,68,68,0.12);padding:8px;border-radius:4px;border:1px solid rgba(239,68,68,0.3)"><b>⚠️ Telegram Error:</b><br>${esc(st.lastError)}</div>` : '';
+
+    await ask({
+      title: 'Telegram Connection & Sync',
+      body: `<div style="font-size:13px;line-height:1.6">
+        <div><b>Status:</b> ${st.connected ? '<span style="color:#22c55e;font-weight:600">● Connected & Listening</span>' : '<span style="color:#ef4444;font-weight:600">● Offline / Disconnected</span>'}</div>
+        <div><b>Monitored Channels:</b> ${esc(channels)}</div>
+        <div><b>Last Telegram Entry in Google Sheets:</b> <code>${esc(lastDate)}</code></div>
+        ${errHtml}
+        <div style="margin-top:12px;color:var(--mut);font-size:12px;border-top:1px solid var(--line);padding-top:8px">
+          💡 When the server turns on (or when you click <b>Catch Up Now</b>), it automatically checks from the day changes stopped being added (<code>${esc(lastDate)}</code>) and imports all missed messages one by one in chronological order.
+        </div>
+      </div>`,
+      confirm: 'Catch Up Now',
+    });
+    $('#btnSyncTg').click();
+  } catch {}
+};
+
 $('#btnSyncTg').onclick = async () => {
   const btn = $('#btnSyncTg');
   btn.disabled = true;
-  btn.textContent = '⏳ Syncing...';
+  btn.textContent = '⏳ Catching up...';
   try {
     const res = await api('/telegram/sync', 'POST');
     if (res.newEntries > 0) {
-      toast(`Synced ${res.newEntries} new entries from Telegram!`);
+      toast(`✅ Added ${res.newEntries} new entries! (Checked ${res.totalProcessed} msgs since ${res.fromDate})`);
       route();
     } else {
-      toast('All caught up! No unadded Telegram messages found.');
+      toast(`All caught up! Checked ${res.totalProcessed} messages since ${res.fromDate}. No unadded entries.`);
     }
   } catch (err) {
-    toast('Sync failed: ' + (err.message || err));
+    toast('Sync failed: ' + (err.message || err), 'bad');
   } finally {
     btn.disabled = false;
     btn.textContent = '🔄 Sync Telegram';
+    updateTgBadge();
   }
 };
 
@@ -984,6 +1025,8 @@ function enter(user) {
   $('#me').textContent = user;
   $('#login').hidden = true;
   $('#shell').hidden = false;
+  updateTgBadge();
+  setInterval(updateTgBadge, 30000);
   route();
 }
 

@@ -46,6 +46,24 @@ function saveSyncState(state: SyncState) {
 }
 
 /**
+ * Finds the latest eventDate or createdAt among all Telegram entries in Google Sheets.
+ * Returns YYYY-MM-DD or null if no telegram entries exist.
+ */
+export function getLastTelegramEntryDate(): string | null {
+  const s = snapshot();
+  let latestDate: string | null = null;
+  for (const e of s.latest.values()) {
+    if (e.source === 'telegram') {
+      const d = e.eventDate || (e.createdAt ? e.createdAt.slice(0, 10) : null);
+      if (d && (!latestDate || d > latestDate)) {
+        latestDate = d;
+      }
+    }
+  }
+  return latestDate;
+}
+
+/**
  * Uses Groq LLM (openai/gpt-oss-120b) to extract expense details from freeform text.
  */
 async function parseWithGroq(
@@ -71,7 +89,7 @@ Extract and respond ONLY with a raw JSON object (no markdown formatting, no back
 }`;
 
   try {
-    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    let res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${groqKey}`,
@@ -84,7 +102,25 @@ Extract and respond ONLY with a raw JSON object (no markdown formatting, no back
       }),
     });
 
-    const data: any = await res.json();
+    let data: any = await res.json();
+    if (res.status === 429 || data.error?.code === 'rate_limit_exceeded') {
+      console.log('[Telegram Groq Rate Limit] Backing off 1.5s before retrying...');
+      await new Promise((r) => setTimeout(r, 1500));
+      res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${groqKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'openai/gpt-oss-120b',
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.1,
+        }),
+      });
+      data = await res.json();
+    }
+
     if (data.error) {
       console.error('[Telegram Groq Error]:', data.error);
       return null;
@@ -170,7 +206,55 @@ interface MonitoredTarget {
 }
 
 let tgClient: TelegramClient | null = null;
+let lastTelegramError: string | null = null;
+let isStartingListener = false;
 const monitoredMap = new Map<string, MonitoredTarget>();
+
+export function getTelegramStatus() {
+  return {
+    connected: Boolean(tgClient && tgClient.connected),
+    monitoredChannels: Array.from(monitoredMap.values()).map((m) => m.title),
+    monitoredCount: monitoredMap.size,
+    lastEntryDate: getLastTelegramEntryDate(),
+    lastError: lastTelegramError,
+  };
+}
+
+export async function disconnectTelegram() {
+  if (tgClient) {
+    try {
+      console.log('[Telegram] Disconnecting MTProto client...');
+      await tgClient.disconnect();
+    } catch (e) {
+      console.error('[Telegram] Disconnect error:', e);
+    } finally {
+      tgClient = null;
+    }
+  }
+}
+
+/**
+ * Ensures MTProto client is connected and listening.
+ */
+export async function ensureTelegramConnected(): Promise<boolean> {
+  if (tgClient && tgClient.connected && monitoredMap.size > 0) {
+    return true;
+  }
+  if (isStartingListener) {
+    for (let i = 0; i < 15; i++) {
+      await new Promise((r) => setTimeout(r, 400));
+      if (tgClient && tgClient.connected && monitoredMap.size > 0) return true;
+    }
+  }
+  try {
+    await startTelegramListener();
+    return Boolean(tgClient && tgClient.connected);
+  } catch (err: any) {
+    lastTelegramError = err.message || String(err);
+    console.error('[Telegram] ensureTelegramConnected failed:', lastTelegramError);
+    return false;
+  }
+}
 
 /**
  * Processes a single Telegram message and saves to Google Sheets if valid.
@@ -216,22 +300,26 @@ async function processMessage(
   const msgDate = message.date ? new Date(message.date * 1000).toISOString().slice(0, 10) : todayET();
   const curWeek = weekStartOf(msgDate);
   const amtFmt = (parsed.amountCents / 100).toFixed(2);
-  const finalNote = parsed.note; // Pure clean note without [TEST] prefix
+  const finalNote = parsed.note;
+  const tgRefTag = `[tg:${message.id}]`;
 
-  // Duplicate Check: Check if an entry with identical unit, amount, kind and date already exists
+  // Duplicate Check: Check if an entry with identical message ID or (unit, amount, kind, date) already exists
   const s = snapshot();
   const alreadyExists = [...s.latest.values()].some(
     (e) =>
-      !e.voided &&
       e.unit === parsed.unit &&
       e.amountCents === parsed.amountCents &&
       e.kind === actualKind &&
       (e.eventDate === msgDate || e.weekStart === curWeek) &&
-      (e.sourceRef === (parsed.reportRef || '') || e.note === finalNote)
+      (
+        (parsed.reportRef && e.sourceRef === parsed.reportRef) ||
+        e.note === finalNote ||
+        (e.statusNote && e.statusNote.includes(tgRefTag))
+      )
   );
 
   if (alreadyExists) {
-    console.log(`[Telegram Catch-Up] Skipping duplicate entry for Unit ${parsed.unit} ($${amtFmt})`);
+    console.log(`[Telegram Catch-Up] Skipping duplicate entry for Unit ${parsed.unit} ($${amtFmt}) [msgId: ${message.id}]`);
     return false;
   }
 
@@ -253,6 +341,13 @@ async function processMessage(
   }
 
   const now = new Date().toISOString();
+  const baseStatusNote = isTestChannel
+    ? `Test from ${targetInfo.title}`
+    : parsed.reportRef
+    ? `Ref: ${parsed.reportRef}`
+    : 'Telegram Ingestion';
+  const fullStatusNote = `${baseStatusNote} ${tgRefTag}`;
+
   const entry: Entry = {
     id: randomUUID(),
     version: 1,
@@ -265,7 +360,7 @@ async function processMessage(
     amountCents: parsed.amountCents,
     note: finalNote,
     status: 'incomplete',
-    statusNote: isTestChannel ? `Test from ${targetInfo.title}` : parsed.reportRef ? `Ref: ${parsed.reportRef}` : 'Telegram Ingestion',
+    statusNote: fullStatusNote,
     source: 'telegram',
     sourceRef: parsed.reportRef || '',
     weekReason: '',
@@ -277,9 +372,9 @@ async function processMessage(
   };
 
   await createEntries([entry]);
-  console.log(`[Telegram Ingested SUCCESS]: Unit ${parsed.unit} (${parsed.party}): ${actualKind} $${amtFmt} - "${finalNote}"`);
+  console.log(`[Telegram Ingested SUCCESS]: Unit ${parsed.unit} (${parsed.party}): ${actualKind} $${amtFmt} - "${finalNote}" (${tgRefTag})`);
 
-  // Send confirmation reply in Telegram (for real-time messages)
+  // Send confirmation reply in Telegram (for real-time messages only)
   if (sendReply) {
     try {
       const sign = actualKind === 'reimbursement' ? '+' : '−';
@@ -299,81 +394,194 @@ async function processMessage(
   return true;
 }
 
+export interface CatchUpOptions {
+  fromDate?: string; // YYYY-MM-DD
+  days?: number;     // Lookback in days
+}
+
 /**
- * Scans past messages sent while server was offline and ingests them.
+ * Scans past messages sent while server was offline and ingests them chronologically one by one.
+ * Automatically goes back to the day changes were last added in Google Sheets if not explicitly specified.
  */
-export async function catchUpMissedMessages(): Promise<{ totalProcessed: number; newEntries: number }> {
-  if (!tgClient) return { totalProcessed: 0, newEntries: 0 };
+export async function catchUpMissedMessages(options?: CatchUpOptions): Promise<{
+  ok: boolean;
+  totalProcessed: number;
+  newEntries: number;
+  fromDate: string;
+  channelsChecked: number;
+  error?: string;
+}> {
+  const connected = await ensureTelegramConnected();
+  if (!connected || !tgClient) {
+    const errMsg = lastTelegramError
+      ? `Telegram connection error: ${lastTelegramError}`
+      : 'Telegram client could not connect. Please check API_ID, API_HASH, and TELEGRAM_SESSION.';
+    return {
+      ok: false,
+      totalProcessed: 0,
+      newEntries: 0,
+      fromDate: '',
+      channelsChecked: 0,
+      error: errMsg,
+    };
+  }
+
+  if (monitoredMap.size === 0) {
+    return {
+      ok: false,
+      totalProcessed: 0,
+      newEntries: 0,
+      fromDate: '',
+      channelsChecked: 0,
+      error: 'No monitored Telegram channels found. Ensure the account belongs to "BUK charges" and "BUK REIMBURSEMENTS".',
+    };
+  }
+
+  // Determine starting date:
+  // 1. Explicit fromDate in options
+  // 2. Explicit days back in options
+  // 3. Last recorded telegram entry date in Google Sheets (minus 1 day for timezone safety)
+  // 4. Default: 7 days ago
+  let targetStartDateStr = options?.fromDate;
+  if (!targetStartDateStr && options?.days && options.days > 0) {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() - options.days);
+    targetStartDateStr = d.toISOString().slice(0, 10);
+  }
+
+  if (!targetStartDateStr) {
+    const lastDate = getLastTelegramEntryDate();
+    if (lastDate) {
+      // Go back 1 day before the last recorded date to account for timezone differences / late posts
+      const d = new Date(lastDate + 'T00:00:00.000Z');
+      d.setUTCDate(d.getUTCDate() - 1);
+      targetStartDateStr = d.toISOString().slice(0, 10);
+      console.log(`[Telegram Catch-Up] Last Telegram entry in sheet was on ${lastDate}. Catching up starting from ${targetStartDateStr}...`);
+    } else {
+      // No telegram entries yet in sheet: look back 7 days
+      const d = new Date();
+      d.setUTCDate(d.getUTCDate() - 7);
+      targetStartDateStr = d.toISOString().slice(0, 10);
+      console.log(`[Telegram Catch-Up] No prior Telegram entries found. Defaulting to 7 days lookback: starting from ${targetStartDateStr}...`);
+    }
+  }
+
+  const targetDateObj = new Date(targetStartDateStr + 'T00:00:00.000Z');
+  const sinceTimestamp = Math.floor(targetDateObj.getTime() / 1000);
+
   const syncState = loadSyncState();
   let newEntries = 0;
   let totalProcessed = 0;
 
   for (const [idKey, target] of monitoredMap.entries()) {
     try {
-      const lastSeenId = syncState.lastSeenIds[idKey] ?? 0;
-      let msgs: any[] = [];
+      console.log(`[Telegram Catch-Up] Scanning channel "${target.title}" for messages since ${targetStartDateStr}...`);
+      const msgsToProcess: any[] = [];
+      let offsetId = 0;
+      const MAX_CHUNKS = 15; // Up to 1,500 messages per channel
 
-      if (lastSeenId > 0) {
-        // Fetch new messages since lastSeenId
-        msgs = await tgClient.getMessages(target.entity, {
-          minId: lastSeenId,
-          limit: 100,
-          reverse: true, // chronological order
-        });
-      } else {
-        // First run on this channel: seed lastSeenId with the newest message
-        const newest = await tgClient.getMessages(target.entity, { limit: 1 });
-        if (newest?.[0]?.id) {
-          syncState.lastSeenIds[idKey] = newest[0].id;
+      for (let chunkIdx = 0; chunkIdx < MAX_CHUNKS; chunkIdx++) {
+        const getParams: any = { limit: 100 };
+        if (offsetId > 0) {
+          getParams.offsetId = offsetId;
         }
+        const chunk: any = await tgClient.getMessages(target.entity, getParams);
+        if (!chunk || chunk.length === 0) break;
+
+        let reachedOlder = false;
+        for (const m of chunk) {
+          if (!m || !m.date) continue;
+          if (m.date >= sinceTimestamp) {
+            msgsToProcess.push(m);
+          } else {
+            reachedOlder = true;
+            break;
+          }
+        }
+
+        if (reachedOlder || chunk.length < 100) {
+          break;
+        }
+
+        offsetId = chunk[chunk.length - 1].id;
+      }
+
+      if (msgsToProcess.length === 0) {
+        console.log(`[Telegram Catch-Up] No messages found in "${target.title}" since ${targetStartDateStr}.`);
         continue;
       }
 
-      if (msgs.length > 0) {
-        console.log(`[Telegram Catch-Up] Found ${msgs.length} messages in "${target.title}" since last run.`);
-        for (const msg of msgs) {
+      // Sort strictly in chronological order (oldest first, newest last)
+      msgsToProcess.sort((a, b) => a.id - b.id);
+      console.log(`[Telegram Catch-Up] Found ${msgsToProcess.length} messages in "${target.title}" since ${targetStartDateStr}. Ingesting one by one...`);
+
+      for (const msg of msgsToProcess) {
+        try {
           totalProcessed++;
           const saved = await processMessage(msg, target, false);
-          if (saved) newEntries++;
+          if (saved) {
+            newEntries++;
+          }
           if (msg.id > (syncState.lastSeenIds[idKey] ?? 0)) {
             syncState.lastSeenIds[idKey] = msg.id;
           }
+          // Small pause to prevent hitting rate limits during bulk backfill
+          await new Promise((r) => setTimeout(r, 150));
+        } catch (msgErr) {
+          console.error(`[Telegram Catch-Up] Error processing message ${msg.id} in "${target.title}":`, msgErr);
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(`[Telegram Catch-Up Error on "${target.title}"]:`, err);
     }
   }
 
   saveSyncState(syncState);
-  if (newEntries > 0) {
-    console.log(`[Telegram Catch-Up Finished] Successfully backfilled ${newEntries} new entries.`);
-  }
-  return { totalProcessed, newEntries };
+  console.log(`[Telegram Catch-Up Finished] Checked ${totalProcessed} messages since ${targetStartDateStr}. Backfilled ${newEntries} new entries.`);
+  return {
+    ok: true,
+    totalProcessed,
+    newEntries,
+    fromDate: targetStartDateStr,
+    channelsChecked: monitoredMap.size,
+  };
 }
 
 /**
  * Starts the Telegram MTProto listener in the background with automatic startup catch-up.
  */
 export async function startTelegramListener() {
+  if (isStartingListener) return;
+  isStartingListener = true;
+
   const apiId = Number(process.env.API_ID);
   const apiHash = String(process.env.API_HASH ?? '');
   const sessionStr = String(process.env.TELEGRAM_SESSION ?? '');
 
   if (!apiId || !apiHash || !sessionStr) {
-    console.log('[Telegram] Listener not started: API_ID, API_HASH or TELEGRAM_SESSION is missing.');
+    lastTelegramError = 'API_ID, API_HASH or TELEGRAM_SESSION is missing in environment variables.';
+    console.warn(`[Telegram] ${lastTelegramError}`);
+    isStartingListener = false;
     return;
   }
 
   try {
+    if (tgClient) {
+      try {
+        await tgClient.disconnect();
+      } catch {}
+      tgClient = null;
+    }
+
     tgClient = new TelegramClient(new StringSession(sessionStr), apiId, apiHash, {
       connectionRetries: 5,
     });
 
     console.log('[Telegram] Connecting MTProto client...');
     await tgClient.connect();
+    lastTelegramError = null;
 
-    const dialogs = await tgClient.getDialogs({ limit: 100 });
+    const dialogs = await tgClient.getDialogs({ limit: 200 });
     const chargesDialog = dialogs.find((d) => /buk\s*charges/i.test(d.title || d.name || ''));
     const reimbDialog = dialogs.find((d) => /buk\s*reimbursements/i.test(d.title || d.name || ''));
     const notesDialog = dialogs.find((d) => /^(notes|test)$/i.test((d.title || d.name || '').trim()));
@@ -381,7 +589,10 @@ export async function startTelegramListener() {
     const reimbTestDialog = dialogs.find((d) => /^reimbursements?\s*test$/i.test((d.title || d.name || '').trim()));
 
     if (!chargesDialog && !reimbDialog && !notesDialog && !chargesTestDialog && !reimbTestDialog) {
-      console.warn('[Telegram] Could not find any monitored channels in dialogs.');
+      lastTelegramError = 'Could not find any monitored channels in Telegram dialogs.';
+      console.warn(`[Telegram] ${lastTelegramError}`);
+      console.log('Available dialogs:', dialogs.map((d) => d.title || d.name).slice(0, 20));
+      isStartingListener = false;
       return;
     }
 
@@ -422,7 +633,7 @@ export async function startTelegramListener() {
       console.log(`[Telegram] Monitored: "${title}" (ID: ${idKey}) → Testing Channel (Charges & Reimbursements)`);
     }
 
-    // 1. Run automatic catch-up for any messages missed while the server was offline
+    // 1. Run automatic catch-up: goes back to the day changes stopped and backfills one by one
     await catchUpMissedMessages().catch((e) => console.error('[Telegram Catch-Up Failed on startup]', e));
 
     // 2. Add real-time event listener for live incoming messages
@@ -465,7 +676,23 @@ export async function startTelegramListener() {
     }, new NewMessage({}));
 
     console.log('[Telegram] Live listener active and listening for new messages!');
-  } catch (err) {
-    console.error('[Telegram] Failed to start listener:', err);
+  } catch (err: any) {
+    const msg = err?.message || String(err);
+    if (msg.includes('AUTH_KEY_DUPLICATED') || err?.code === 406) {
+      lastTelegramError = 'AUTH_KEY_DUPLICATED: Session is revoked or used by another instance. Please generate a new session with npm run tg-auth.';
+      console.error('CRITICAL [Telegram]:', lastTelegramError);
+    } else {
+      lastTelegramError = msg;
+      console.error('[Telegram] Failed to start listener:', err);
+    }
+    if (tgClient) {
+      try {
+        await tgClient.disconnect();
+      } catch {}
+      tgClient = null;
+    }
+  } finally {
+    isStartingListener = false;
   }
 }
+

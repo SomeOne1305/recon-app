@@ -129,8 +129,8 @@ async function main() {
     await verifyCode(arg1, arg2);
   } else {
     console.log('Usage:');
-    console.log('  tsx scripts/tg-auth.ts send-code <phoneNumber>');
-    console.log('  tsx scripts/tg-auth.ts verify <code> [password]');
+    console.log('  npm run tg-auth send-code [phoneNumber]');
+    console.log('  npm run tg-auth verify <code> [password]');
   }
 }
 

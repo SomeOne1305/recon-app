@@ -30,3 +30,16 @@ Create a Google Sheet with three exact lowercase tabs:
 1. Share the Google Sheet with your service account email as **Editor**.
 2. Copy `.env.example` to `.env` and fill in `SHEET_ID`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `APP_USERS`, and `SESSION_SECRET` (must be 32+ characters).
 3. Run `npm install && npm run dev` and open `http://localhost:3000`.
+
+## Telegram Ingestion & Catch-Up
+
+1. **Automatic Startup Catch-Up**: Whenever the server starts up (e.g. after Render spins up from sleep), the app queries Google Sheets for the date of the last recorded Telegram entry and automatically backfills all missed messages from monitored channels one by one in chronological order.
+2. **Manual Sync**: Click **🔄 Sync Telegram** in the top navigation bar at any time to run catch-up and view live ingestion stats.
+3. **Telegram Status**: Click the **● TG** badge in the header to view live MTProto connection state, monitored channel names, and error details.
+4. **Re-authenticating Telegram**:
+   ```bash
+   npm run tg-auth send-code +998910131630
+   npm run tg-auth verify <code> [2fa_password]
+   ```
+   Copy the generated `TELEGRAM_SESSION` from `.env` to Render Environment Variables.
+5. **Keep Render Awake**: Render Free services sleep after 15 minutes of inactivity. Set up a free monitor (e.g., [UptimeRobot](https://uptimerobot.com)) to ping `https://your-app.onrender.com/api/health` every 10 minutes to keep the live listener running 24/7. Even if sleeping, waking the server will automatically catch up all missed messages!

@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "tg-auth": "tsx scripts/tg-auth.ts"
   },
   "dependencies": {
     "express": "^4.21.0",

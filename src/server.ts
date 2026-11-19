@@ -41,7 +41,12 @@ import {
   assertEscrowRoom,
   buildRoll,
 } from './slice3.js';
-import { startTelegramListener, catchUpMissedMessages } from './telegram.js';
+import {
+  startTelegramListener,
+  catchUpMissedMessages,
+  getTelegramStatus,
+  disconnectTelegram,
+} from './telegram.js';
 
 // ───────── Auth: embedded login form + signed HttpOnly session cookie ─────────
 const users = (process.env.APP_USERS ?? '')
@@ -180,6 +185,16 @@ app.post(
     res.json({ saved: rows.length, ids: rows.map((r) => r.id) });
   })
 );
+
+// ───────── Health Check for Keep-Alive & Monitoring (Render, UptimeRobot, etc.) ─────────
+app.get(['/api/health', '/health'], (_req, res) => {
+  res.json({
+    ok: true,
+    uptimeSeconds: Math.floor(process.uptime()),
+    timestamp: new Date().toISOString(),
+    telegram: getTelegramStatus(),
+  });
+});
 
 // Session auth middleware for all other /api routes
 app.use('/api', (req, res, next) => {
@@ -550,12 +565,24 @@ app.post(
   })
 );
 
-// ───────── Sync Telegram Missed Messages (Catch-Up) ─────────
+// ───────── Sync Telegram Missed Messages (Catch-Up) & Status ─────────
+app.get(
+  '/api/telegram/status',
+  h((_req, res) => {
+    res.json(getTelegramStatus());
+  })
+);
+
 app.post(
   '/api/telegram/sync',
-  h(async (_req, res) => {
-    const result = await catchUpMissedMessages();
-    res.json({ ok: true, ...result });
+  h(async (req, res) => {
+    const fromDate = req.body?.fromDate ? String(req.body.fromDate) : undefined;
+    const days = req.body?.days ? Number(req.body.days) : undefined;
+    const result = await catchUpMissedMessages({ fromDate, days });
+    if (!result.ok) {
+      throw new UserError(result.error || 'Telegram catch-up failed', 400);
+    }
+    res.json(result);
   })
 );
 
@@ -761,8 +788,29 @@ setInterval(async () => {
 
 const PORT = Number(process.env.PORT ?? 3000);
 
-app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`Reconciliation app running on port ${PORT}`);
   console.log(`  Local:   http://localhost:${PORT}`);
   console.log(`  Network: http://<your-LAN-IP>:${PORT}`);
 });
+
+// Clean graceful shutdown on Render restarts or container stop to avoid Telegram AUTH_KEY_DUPLICATED
+let isShuttingDown = false;
+const shutdown = async (signal: string) => {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+  console.log(`[Server] Received ${signal}. Shutting down cleanly...`);
+  try {
+    await disconnectTelegram();
+  } catch (e) {
+    console.error('[Telegram] Error disconnecting during shutdown:', e);
+  }
+  server.close(() => {
+    console.log('[Server] HTTP server closed.');
+    process.exit(0);
+  });
+  setTimeout(() => process.exit(0), 3000).unref();
+};
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
